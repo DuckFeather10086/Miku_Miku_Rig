@@ -424,7 +424,7 @@ def RIG2(context):
     rigify_arm.select_set(True)
 
     bpy.ops.pose.rigify_generate()
-    rig=bpy.data.objects["rig"]
+    rig=context.view_layer.objects.active
 
     #删除无用骨架
     bpy.data.objects.remove(rigify_arm,do_unlink=True)
@@ -519,12 +519,13 @@ def RIG2(context):
         #Groove.bone.layers=rig.data.bones["torso"].layers
         #Groove.bone_group = rig.pose.bone_groups['Special'] 
         Center=rig.pose.bones["Center"]
-        Center.mmd_bone.name_j='センター'
-        Center.custom_shape = bpy.data.objects["WGT-rig_root"]
+        #Center.mmd_bone.name_j='センター'
+        Center.custom_shape = rig.pose.bones["root"].custom_shape
         Center.bone.layers=rig.data.bones["torso"].layers
         Center.bone_group = rig.pose.bone_groups['Special'] 
     else:
-        rig.pose.bones['MCH-torso.parent'].mmd_bone.name_j='グルーブ'
+        #rig.pose.bones['MCH-torso.parent'].mmd_bone.name_j='グルーブ'
+        pass
 
     #添加约束
     #add constraint
