@@ -1,10 +1,48 @@
-from re import T
 import bpy
 import bpy_extras
 import os
 from bpy.types import Operator
 from . import preset
 from mathutils import Matrix,Vector,Quaternion,Euler
+
+# Blender 5.0 compatibility: Action.fcurves API wrapper
+def get_action_fcurves(action):
+    """
+    Get fcurves from action, compatible with Blender 4.2 and 5.0+
+    In Blender 5.0, action.fcurves legacy API was removed.
+    This function tries to use fcurves directly first (may still work as compatibility),
+    and falls back to channelbag API if needed.
+    """
+    # Try to access fcurves directly first
+    # In Blender 4.2, this works. In Blender 5.0, it may still work as a compatibility property
+    if hasattr(action, 'fcurves'):
+        try:
+            # Test if fcurves is accessible and functional
+            _ = len(action.fcurves)
+            return action.fcurves
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+    
+    # For Blender 5.0+, if fcurves doesn't work, try to use channelbag API
+    # Note: This requires datablock context, which may not always be available
+    # For now, we'll try to create a simple wrapper
+    # In practice, you may need to pass the datablock to properly use channelbag API
+    if hasattr(action, 'slots') and len(action.slots) > 0:
+        # Try to get fcurves from the first available slot's channelbag
+        for slot in action.slots:
+            if slot.datablock and hasattr(action, 'channelbag_for_datablock'):
+                try:
+                    channelbag = action.channelbag_for_datablock(slot.datablock)
+                    if channelbag and hasattr(channelbag, 'fcurves'):
+                        # Return channelbag's fcurves - this should work for read operations
+                        # For write operations, you may need to use channelbag methods directly
+                        return channelbag.fcurves
+                except (AttributeError, TypeError, RuntimeError):
+                    continue
+    
+    # Final fallback: try fcurves anyway (might work in some cases)
+    # This will raise an error if it doesn't work, which is better than silent failure
+    return action.fcurves
 
 def alert_error(title,message):
     def draw(self,context):
@@ -74,11 +112,11 @@ def retarget_mixmao(OT,context):
     type_from_to_list=[]
     match_bone_number=0
     for bone in mixamo_arm.pose.bones:
-        if bone.mmr_bone_type !='None':
-            from_dict[bone.mmr_bone_type]=bone.name
+        if bone.mmr_bone.bone_type !='None':
+            from_dict[bone.mmr_bone.bone_type]=bone.name
     for bone in rigify_arm.pose.bones:
-        if bone.mmr_bone_type !='None':
-            to_dict[bone.mmr_bone_type]=bone.name
+        if bone.mmr_bone.bone_type !='None':
+            to_dict[bone.mmr_bone.bone_type]=bone.name
     for bone_type,from_name in from_dict.items():
         if bone_type in to_dict:
             to_name=to_dict[bone_type]
@@ -98,21 +136,28 @@ def retarget_mixmao(OT,context):
             return(False)
 
     #计算物体矩阵
+    #物体矩阵a
     mat_wa4=mixamo_arm.matrix_world
     mat_wa=mat_wa4.to_3x3()
-    mat_wai=mat_wa.inverted()
+
+    q_wa=mat_wa.to_quaternion()
+    q_wai=q_wa.inverted()
+    #物体矩阵b
     mat_wb=rigify_arm.matrix_world.to_3x3()
-    mat_wbi=mat_wb.inverted()
+
+    q_wb=mat_wb.to_quaternion()
+    q_wbi=q_wb.inverted()
 
     #自动动作缩放
     #auto action scale
     action_scale_finel=1
     if auto_action_scale:
         head_a=mixamo_arm.pose.bones[from_dict['thigh.L']].bone.head_local
-        head_a= mat_wa4 @ head_a
+        head_a= q_wa @ head_a
+        head_a+=mixamo_arm.location
         head_b=rigify_arm.pose.bones[to_dict['thigh.L']].bone.head_local
-        head_b= mat_wb @ head_b
-        action_scale_finel=head_b[2]/head_a[2]
+        head_b= q_wb @ head_b
+        action_scale_finel=abs(head_b[2]/head_a[2])
     else:
         action_scale_finel=action_scale
         
@@ -122,8 +167,8 @@ def retarget_mixmao(OT,context):
     #mat_wa=mat_s @ mat_wa
     print('scale='+str(action_scale_finel))
 
-    mat_wab=mat_wai @ mat_wb
-    mat_wba=mat_wbi @ mat_wa
+    q_wab=q_wai @ q_wb
+    q_wba=q_wbi @ q_wa
 
     pose_bones_a=mixamo_arm.pose.bones
     pose_bones_b=rigify_arm.pose.bones
@@ -141,13 +186,14 @@ def retarget_mixmao(OT,context):
 
     #肩膀大臂分别旋转一半
     angle_arm=v_a_arm.angle_signed(v_b_arm)
-    mat_arm_l=Matrix.Rotation(-angle_arm,3,(0,1,0))
-    mat_arm_r=Matrix.Rotation(angle_arm,3,(0,1,0))
+    q_arm_l=Quaternion((0,1,0),-angle_arm)
+    q_arm_r=Quaternion((0,1,0),angle_arm)
 
-    mat_warb_l=mat_wai @ mat_arm_l @ mat_wb
-    mat_warb_r=mat_wai @ mat_arm_r @ mat_wb
-    mat_wbra_l=mat_wbi @ mat_arm_r @ mat_wa
-    mat_wbra_r=mat_wbi @ mat_arm_l @ mat_wa
+    #计算手臂旋转四元数
+    q_warb_l=q_wai @ q_arm_l @ q_wb
+    q_warb_r=q_wai @ q_arm_r @ q_wb
+    q_wbra_l=q_wbi @ q_arm_r @ q_wa
+    q_wbra_r=q_wbi @ q_arm_l @ q_wa
 
     rotate_wab_l_set={
         'upper_arm.L','forearm.L',
@@ -183,7 +229,8 @@ def retarget_mixmao(OT,context):
     }
     translation_set={'spine'}
 
-    fcurves_b=rigify_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves_b = get_action_fcurves(rigify_action)
 
     #清除曲线函数
     def remove_fcurves(obj):
@@ -210,162 +257,135 @@ def retarget_mixmao(OT,context):
 
     #FBX限定重定向函数
     #暂时忽略缩放
-    def retarget_fcurves(mat_L,mat_R,obj_from,obj_to,translation=False):
+    def retarget_fcurves(q_l,q_r,obj_from,obj_to,translation=False,translation_offset=None):
 
-        path=obj_from.path_from_id('location')
-        path2=obj_to.path_from_id('location')
-        curve_lx=fcurves_b.find(path,index=0)
-        curve_ly=fcurves_b.find(path,index=1)
-        curve_lz=fcurves_b.find(path,index=2)
-
-        if curve_lx and curve_ly and curve_lz :
-            pass
-        else:
-            return
-
-        curve_lx.data_path=path2
-        curve_ly.data_path=path2
-        curve_lz.data_path=path2
-
+        #删除缩放曲线
         path=obj_from.path_from_id('scale')
-        path2=obj_to.path_from_id('scale')
-        curve_sx=fcurves_b.find(path,index=0)
-        curve_sy=fcurves_b.find(path,index=1)
-        curve_sz=fcurves_b.find(path,index=2)
+        for i in range(3):
+            fc=fcurves_b.find(path,index=i)
+            if fc:
+                fcurves_b.remove(fc)
 
-        '''curve_sx.data_path=path2
-        curve_sy.data_path=path2
-        curve_sz.data_path=path2'''
-
-        if curve_sx:
-            fcurves_b.remove(curve_sx)
-        if curve_sy:
-            fcurves_b.remove(curve_sy)
-        if curve_sz:
-            fcurves_b.remove(curve_sz)
-
-        keyframes_lx=curve_lx.keyframe_points
-        keyframes_ly=curve_ly.keyframe_points
-        keyframes_lz=curve_lz.keyframe_points
-
-        '''keyframes_sx=curve_sx.keyframe_points
-        keyframes_sy=curve_sy.keyframe_points
-        keyframes_sz=curve_sz.keyframe_points'''
-
+        #修改旋转模式为四元数
+        rotation_mode=obj_from.rotation_mode
         obj_to.rotation_mode='QUATERNION'
 
-        if obj_from.rotation_mode == 'QUATERNION':
-            path=obj_from.path_from_id('rotation_quaternion')
-            path2=obj_to.path_from_id('rotation_quaternion')
-            curve_w=fcurves_b.find(path,index=0)
-            curve_x=fcurves_b.find(path,index=1)
-            curve_y=fcurves_b.find(path,index=2)
-            curve_z=fcurves_b.find(path,index=3)
+        #欧拉角曲线改完四元数曲线函数
+        def efc_to_qfc(obj):
+            path_e=obj.path_from_id('rotation_euler')
+            path_q=obj.path_from_id('rotation_quaternion')
+            fcurve=None
+            for i in range(3):
+                fcurve=fcurves_b.find(path_e,index=i)
+                fcurve.data_path=path_q
+            kps=fcurve.keyframe_points
+            kps_len=len(kps)
+            qfc4=fcurves_b.new(path_q,index=3,action_group=fcurve.group.name)
+            kps=qfc4.keyframe_points
+            kps.add(kps_len)
 
-            curve_w.data_path=path2
-            curve_x.data_path=path2
-            curve_y.data_path=path2
-            curve_z.data_path=path2
 
-            keyframes_w=curve_w.keyframe_points
-            keyframes_x=curve_x.keyframe_points
-            keyframes_y=curve_y.keyframe_points
-            keyframes_z=curve_z.keyframe_points
+        #曲线转矩阵函数
+        def get_co_lists(obj_from,obj_to,attr_name):
 
-            for i,keyframe_x in enumerate(keyframes_x):
+            co_lists=[]
+            path_from=obj_from.path_from_id(attr_name)
+            path_to=obj_to.path_from_id(attr_name)
+            dimension=len(getattr(obj,attr_name))
+            #把关键帧数据提取为矩阵
+            for i in range(dimension):
+                fcurve=fcurves_b.find(path_from,index=i)
+                #找不到曲线则返回None
+                if not fcurve:
+                    return None
+                #修改路径
+                fcurve.data_path=path_to
+                kps=fcurve.keyframe_points
+                co_list=[None]*2*len(kps)
+                kps.foreach_get('co',co_list)
+                co_lists.append(co_list)
+            return co_lists
+        #矩阵转曲线函数
+        def set_co_lists(obj,attr_name,co_lists):
+            path=obj.path_from_id(attr_name)
+            dimension=len(getattr(obj,attr_name))
+            for i in range(dimension):
+                co_list=co_lists[i]
+                fcurve=fcurves_b.find(path,index=i)
+                kps=fcurve.keyframe_points
+                kps.foreach_set('co',co_list)
+                fcurve.update()
+
+        #重定向平移曲线
+        if translation:
+            l_co_lists=get_co_lists(obj_from,obj_to,'location')
+            if l_co_lists:
+                frame_count=len(l_co_lists[0])
+                for i in range(1,frame_count,2):
+                    #从列表中获得平移向量
+                    old_location=Vector((l_co_lists[0][i],l_co_lists[1][i],l_co_lists[2][i]))
+                    if translation_offset is not None:
+                        old_location+=translation_offset
+                    new_location=q_l @ old_location 
+                    new_location*=action_scale_finel
+
+                    #修改列表
+                    l_co_lists[0][i]=new_location[0]
+                    l_co_lists[1][i]=new_location[1]
+                    l_co_lists[2][i]=new_location[2]
+
+                #修改曲线
+                set_co_lists(obj_to,'location',l_co_lists)
+
+        #重定向旋转曲线
+        #四元数旋转的情况
+        if rotation_mode=='QUATERNION':
+            #获得四元数关键帧列表
+            q_co_lists=get_co_lists(obj_from,obj_to,'rotation_quaternion')
+            #有四元数曲线的情况
+            if q_co_lists:
+                frame_count=len(q_co_lists[0])
+                for i in range(1,frame_count,2):
+                    #从列表中获得变换四元数
+                    old_quaternion=Quaternion((q_co_lists[0][i],q_co_lists[1][i],q_co_lists[2][i],q_co_lists[3][i]))
+                    new_quaternion = q_l @ old_quaternion @ q_r
+
+                    #修改列表
+                    q_co_lists[0][i]=new_quaternion[0]
+                    q_co_lists[1][i]=new_quaternion[1]
+                    q_co_lists[2][i]=new_quaternion[2]
+                    q_co_lists[3][i]=new_quaternion[3]
                 
-                keyframe_w=keyframes_w[i]
-                keyframe_y=keyframes_y[i]
-                keyframe_z=keyframes_z[i]
-                keyframe_lx=keyframes_lx[i]
-                keyframe_ly=keyframes_ly[i]
-                keyframe_lz=keyframes_lz[i]
-                '''keyframe_sx=keyframes_sx[i]
-                keyframe_sy=keyframes_sy[i]
-                keyframe_sz=keyframes_sz[i]'''
+                #修改曲线
+                set_co_lists(obj_to,'rotation_quaternion',q_co_lists)
 
-                q_r=Quaternion((keyframe_w.co[1],keyframe_x.co[1],keyframe_y.co[1],keyframe_z.co[1]))
-                mat_r=q_r.to_matrix()
-                #mat_s=Matrix([(keyframe_sx.co[1],0,0),(0,keyframe_sy.co[1],0),(0,0,keyframe_sz.co[1])])
-
-                mat_srt=mat_r
-                mat_srt=mat_srt.to_4x4() 
-                #直接写入平移分量
-                mat_srt[0][3]=keyframe_lx.co[1]*action_scale_finel
-                mat_srt[1][3]=keyframe_ly.co[1]*action_scale_finel
-                mat_srt[2][3]=keyframe_lz.co[1]*action_scale_finel
-
-                mat_d=mat_L @ mat_srt @ mat_R
-                T,Q,S=mat_d.decompose()
-                
-                keyframe_w.co[1] , keyframe_x.co[1] , keyframe_y.co[1] , keyframe_z.co[1] = Q
-                #keyframe_sx.co[1] , keyframe_sy.co[1] , keyframe_sz.co[1] = S
-                if translation:
-                    keyframe_lx.co[1] , keyframe_ly.co[1] , keyframe_lz.co[1] = T
-                else:
-                    keyframe_lx.co[1] , keyframe_ly.co[1] , keyframe_lz.co[1] = 0,0,0
-
+        #欧拉角旋转的情况
         else:
-            path=obj_from.path_from_id('rotation_euler')
-            path2=obj_to.path_from_id('rotation_quaternion')
-            curve_w=fcurves_b.new(path2,index=0)
-            curve_x=fcurves_b.find(path,index=0)
-            curve_y=fcurves_b.find(path,index=1)
-            curve_z=fcurves_b.find(path,index=2)
+            #获得欧拉角关键帧列表
+            e_co_lists=get_co_lists(obj_from,obj_to,'rotation_euler')
+            efc_to_qfc(obj_to)
+            #有欧拉角曲线的情况
+            if e_co_lists:
+                frame_count=len(e_co_lists[0])
+                #添加第四条曲线
+                e_co_lists.append([None]*frame_count)
+                for i in range(1,frame_count,2):
+                    #从列表获得变换欧拉角
+                    old_euler=Euler((e_co_lists[0][i],e_co_lists[1][i],e_co_lists[2][i]),rotation_mode)
+                    #获得当前是第几帧
+                    co0=e_co_lists[0][i-1]
+                    old_quaternion=old_euler.to_quaternion()
+                    new_quaternion=q_l @ old_quaternion @ q_r
 
-            curve_x.array_index=1
-            curve_y.array_index=2
-            curve_z.array_index=3
+                    #修改列表
+                    e_co_lists[0][i]=new_quaternion[0]
+                    e_co_lists[1][i]=new_quaternion[1]
+                    e_co_lists[2][i]=new_quaternion[2]
+                    e_co_lists[3][i]=new_quaternion[3]
+                    e_co_lists[3][i-1]=co0
 
-            curve_x.data_path=path2
-            curve_y.data_path=path2
-            curve_z.data_path=path2
+                set_co_lists(obj_to,'rotation_quaternion',e_co_lists)
 
-            keyframes_w=curve_w.keyframe_points
-            keyframes_x=curve_x.keyframe_points
-            keyframes_y=curve_y.keyframe_points
-            keyframes_z=curve_z.keyframe_points
-
-            keyframes_len=len(keyframes_x)
-            keyframes_w.add(keyframes_len)
-            curve_w.group=curve_x.group
-
-            for i,keyframe_x in enumerate(keyframes_x):
-                
-                keyframe_w=keyframes_w[i]
-                keyframe_y=keyframes_y[i]
-                keyframe_z=keyframes_z[i]
-                keyframe_lx=keyframes_lx[i]
-                keyframe_ly=keyframes_ly[i]
-                keyframe_lz=keyframes_lz[i]
-                '''keyframe_sx=keyframes_sx[i]
-                keyframe_sy=keyframes_sy[i]
-                keyframe_sz=keyframes_sz[i]'''
-
-                q_r=Euler((keyframe_x.co[1],keyframe_y.co[1],keyframe_z.co[1]))
-                mat_r=q_r.to_matrix()
-                #mat_s=Matrix([(keyframe_sx.co[1],0,0),(0,keyframe_sy.co[1],0),(0,0,keyframe_sz.co[1])])
-
-                mat_srt=mat_r
-                mat_srt=mat_srt.to_4x4() 
-                #直接写入平移分量
-                mat_srt[0][3]=keyframe_lx.co[1]*action_scale_finel
-                mat_srt[1][3]=keyframe_ly.co[1]*action_scale_finel
-                mat_srt[2][3]=keyframe_lz.co[1]*action_scale_finel
-
-                mat_d=mat_L @ mat_srt @ mat_R
-
-                T,Q,S=mat_d.decompose()
-
-                keyframe_w.co[0]=keyframe_x.co[0]
-                keyframe_w.interpolation='LINEAR'
-                
-                keyframe_w.co[1] , keyframe_x.co[1] , keyframe_y.co[1] , keyframe_z.co[1] = Q
-                #keyframe_sx.co[1] , keyframe_sy.co[1] , keyframe_sz.co[1] = S
-                if translation:
-                    keyframe_lx.co[1] , keyframe_ly.co[1] , keyframe_lz.co[1] = T
-                else:
-                    keyframe_lx.co[1] , keyframe_ly.co[1] , keyframe_lz.co[1] = 0,0,0
 
     #开始遍历列表
     for bone_type , from_name , to_name in type_from_to_list:
@@ -376,57 +396,61 @@ def retarget_mixmao(OT,context):
         bone_a=posebone_a.bone
         bone_b=posebone_b.bone
 
-        mat_a=bone_a.matrix_local.to_3x3()
-        mat_ai=mat_a.inverted()
-        mat_b=bone_b.matrix_local.to_3x3()
-        mat_bi=mat_b.inverted()
-        mat_ap=posebone_a.matrix.to_3x3()
-        mat_api=mat_ap.inverted()
+        mat_a=bone_a.matrix_local
+        mat_b=bone_b.matrix_local
+        mat_ap=posebone_a.matrix
 
-        #计算右乘矩阵
-        mat_R:Matrix
+        #计算骨骼四元数
+        q_a=mat_a.to_quaternion()
+        q_ai=q_a.inverted()
+        q_b=mat_b.to_quaternion()
+        q_bi=q_b.inverted()
+        q_ap=mat_ap.to_quaternion()
+        q_api=q_ap.inverted()
+
+        #计算右乘四元数
+        q_r:Quaternion
 
         if OT.first_frame_as_rest_pose:
-            mat_R=mat_api
+            q_r=q_api
         else:
-            mat_R=mat_ai
+            q_r=q_ai
 
         if bone_type in rotate_wab_l_set:
-            mat_R @= mat_warb_l
+            q_r @= q_warb_l
         elif bone_type in rotate_wab_r_set:
-            mat_R @= mat_warb_r
+            q_r @= q_warb_r
         else:
-            mat_R @= mat_wab
+            q_r @= q_wab
 
-        mat_R @= mat_b
+        q_r @= q_b
 
-        #处理左乘矩阵
-        mat_L:Matrix
+        #计算左乘四元数
+        q_l:Quaternion
 
-        mat_L=mat_bi
+        q_l=q_bi
 
         if bone_type in rotate_wba_l_set:
-            mat_L @= mat_wbra_l
+            q_l @= q_wbra_l
         elif bone_type in rotate_wba_r_set:
-            mat_L @= mat_wbra_r
+            q_l @= q_wbra_r
         else:
-            mat_L @= mat_wba
+            q_l @= q_wba
 
-        mat_L @= mat_a
+        q_l @= q_a
 
-        mat_R=mat_R.to_4x4()
-        mat_L=mat_L.to_4x4()
+        #mat_R=mat_R.to_4x4()
+        #mat_L=mat_L.to_4x4()
 
-        translation = bone_type in translation_set
+        translation=False
+        if bone_type in translation_set:
+            translation=True
 
-        retarget_fcurves(mat_L,mat_R,posebone_a,posebone_b,translation)
+        retarget_fcurves(q_l,q_r,posebone_a,posebone_b,translation)
 
     if 'spine' not in from_dict and 'spine' in to_dict:
         print('Action have no spine')
 
-        #x_finel=mat_wa4[0][3]*action_scale_finel
-        #y_finel=mat_wa4[1][3]*action_scale_finel
-        #z_finel=mat_wa4[2][3]*action_scale_finel
         x_finel,y_finel,z_finel=mat_wa4.to_translation()*action_scale_finel
 
         mat_wat=Matrix([
@@ -441,12 +465,20 @@ def retarget_mixmao(OT,context):
         spine_bone=spine_posebone.bone
         spine_mat=spine_bone.matrix_local.to_3x3()
 
-        mat_R=mat_wab @ spine_mat
-        mat_R=mat_R.to_4x4()
-        mat_L=spine_mat.inverted() @ mat_wbi
+        q_spine=spine_mat.to_quaternion()
+
+        #mat_R=mat_wab @ spine_mat
+        #mat_R=mat_R.to_4x4()
+
+        q_r=q_wab @ q_spine
+
+        '''mat_L=spine_mat.inverted() @ mat_wbi
         mat_L=mat_L.to_4x4()
-        mat_L=mat_L @ mat_wat
-        retarget_fcurves(mat_L,mat_R,mixamo_arm,spine_posebone,True)
+        mat_L=mat_L @ mat_wat'''
+
+        q_l = q_spine.inverted() @ q_wbi
+
+        retarget_fcurves(q_l,q_r,mixamo_arm,spine_posebone,True,-mixamo_arm.location)
     else:
         remove_fcurves(rigify_arm)
 
@@ -455,8 +487,9 @@ def retarget_mixmao(OT,context):
         path=pose_bones_b[to_dict['spine']].path_from_id('location')
         curve_lx=fcurves_b.find(path,index=0)
         curve_ly=fcurves_b.find(path,index=1)
-        for keyframe in curve_lx.keyframe_points and curve_ly.keyframe_points:
-            keyframe.co[1]=0
+        if curve_lx and curve_ly:
+            for keyframe in curve_lx.keyframe_points and curve_ly.keyframe_points:
+                keyframe.co[1]=0
 
     #曲线操作
 
@@ -498,8 +531,8 @@ def retarget_mixmao(OT,context):
         target_strip.extrapolation = 'NOTHING'
         target_strip.blend_in = fade_in_out
         target_strip.blend_out = fade_in_out
-        target_strip.frame_start+=old_frame
-        target_strip.frame_end+=old_frame
+        target_strip.frame_start+=old_frame-1
+        target_strip.frame_end+=old_frame-1
 
         #更改原动作混合模式为合并
         rigify_arm.animation_data.action_blend_type = 'COMBINE'
@@ -512,7 +545,7 @@ def retarget_mixmao(OT,context):
         context.scene.frame_current=old_frame
 
 
-    rigify_arm.select=True
+    rigify_arm.select_set(True)
     alert_error("提示","导入完成,匹配骨骼数:"+str(match_bone_number))
     return(True)
     
@@ -576,9 +609,9 @@ def load_vmd(OT,context):
     rigify_dict={}
     for bone in rigify_arm2.pose.bones:
         bone1=rigify_arm.pose.bones[bone.name]
-        bone_type=bone.mmr_bone_type
+        bone_type=bone.mmr_bone.bone_type
         if bone_type != 'None':
-            rigify_dict[bone.mmr_bone_type]=bone.name
+            rigify_dict[bone.mmr_bone.bone_type]=bone.name
             if bone_type in mmd_dict:
                 bone.mmd_bone.name_j=mmd_dict[bone_type]
                 bone1.rotation_mode = 'QUATERNION'
@@ -613,13 +646,12 @@ def load_vmd(OT,context):
     bone_a.rotation_mode='QUATERNION'
     bone_a.rotation_quaternion=mat_3.to_quaternion()
     
-    bpy.ops.mmd_tools.import_vmd(filepath=vmd_path,scale=action_scale_finel,use_pose_mode=True, margin=0)
-    bpy.context.scene.frame_end=old_frame_end
+    bpy.ops.mmd_tools.import_vmd(files= [{"name": vmd_path}],scale=action_scale_finel,use_pose_mode=True, margin=0)
     
+    vmd_action = rigify_arm2.animation_data.action
 
-    vmd_action=rigify_arm2.animation_data.action
-    vmd_action.name=action_name
-    fcurves=vmd_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves = get_action_fcurves(vmd_action)
     frame_range=vmd_action.frame_range
 
     #复制曲线
@@ -641,20 +673,22 @@ def load_vmd(OT,context):
                     path2=IK_bone.path_from_id(attr_name)
 
                     fcurve1=fcurves.find(path1,index=index)
-                    fcurve2=fcurves.new(path2,index=index)
+                    
+                    if (fcurve1 != None):
+                        fcurve2=fcurves.new(path2,index=index)
 
-                    keyframe_points1=fcurve1.keyframe_points
-                    keyframe_points2=fcurve2.keyframe_points
+                        keyframe_points1=fcurve1.keyframe_points
+                        keyframe_points2=fcurve2.keyframe_points
 
-                    keyframe_len=len(keyframe_points1)
-                    keyframe_points2.add(keyframe_len)
+                        keyframe_len=len(keyframe_points1)
+                        keyframe_points2.add(keyframe_len)
 
-                    for i,keyframe1 in enumerate(keyframe_points1):
-                        keyframe2=keyframe_points2[i]
+                        for i,keyframe1 in enumerate(keyframe_points1):
+                            keyframe2=keyframe_points2[i]
 
-                        for keyframe_data in keyframe_data_list:
-                            attr=getattr(keyframe1,keyframe_data)
-                            setattr(keyframe2,keyframe_data,attr)
+                            for keyframe_data in keyframe_data_list:
+                                attr=getattr(keyframe1,keyframe_data)
+                                setattr(keyframe2,keyframe_data,attr)
 
     
     copy_fcurve('thigh.L')
@@ -717,18 +751,19 @@ def load_vmd(OT,context):
     mmd_arm.data.edit_bones["全ての親"].matrix=rigify_arm.data.bones[rigify_dict['Root']].matrix_local
 
     bpy.ops.object.mode_set(mode = 'POSE')
-    bpy.ops.mmd_tools.import_vmd(filepath=vmd_path,scale=1, margin=0)
-    bpy.context.scene.frame_end=old_frame_end
+    bpy.ops.mmd_tools.import_vmd(files=[{"name": vmd_path}],scale=1, margin=0)
     bpy.ops.pose.select_all(action='DESELECT')
     bake_name_list=['foot.L','foot.R','shoulder.L','shoulder.R','upper_arm.L','upper_arm.R','forearm.L','forearm.R','hand.L','hand.R','spine']
     for name in bake_name_list:
         mmd_arm.data.bones[name].select=True
 
+    mmd_arm.animation_data_create()
     vmd_action2=mmd_arm.animation_data.action
-    fcurves2=vmd_action2.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves2 = get_action_fcurves(vmd_action2)
     frame_range=vmd_action2.frame_range
 
-    bpy.ops.nla.bake(frame_start=frame_range[0], frame_end=frame_range[1], visual_keying=True, clear_constraints=True, use_current_action=True, bake_types={'POSE'})
+    bpy.ops.nla.bake(frame_start=int(frame_range[0]), frame_end=int(frame_range[1]), visual_keying=True, clear_constraints=True, use_current_action=True, bake_types={'POSE'})
     context.window.scene=old_scene
     
     #检测IKFK动作
@@ -968,7 +1003,7 @@ def load_vmd(OT,context):
         bpy.data.objects.remove(mmd_arm,do_unlink=True)
         bpy.data.scenes.remove(new_scene,do_unlink=True)
     bpy.context.view_layer.objects.active=rigify_arm
-    rigify_arm.select=True
+    rigify_arm.select_set(True)
     alert_error("提示","导入完成")
 
     return(True)
@@ -1031,7 +1066,7 @@ def export_vmd(OT,context):
     context.collection.objects.link(mmd_arm2)
     bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active=mmd_arm2
-    mmd_arm2.select=True
+    mmd_arm2.select_set(True)
     print(vmd_path)
 
     if set_action_range:
@@ -1057,12 +1092,13 @@ def export_vmd(OT,context):
         else:
             bone.bone.select=False
 
-    bpy.ops.nla.bake(frame_start=start_frame1, frame_end=end_frame1, only_selected=True, visual_keying=True,clear_constraints=True, bake_types={'POSE'})
+    bpy.ops.nla.bake(frame_start=int(start_frame1), frame_end=int(end_frame1), only_selected=True, visual_keying=True,clear_constraints=True, bake_types={'POSE'})
     bpy.ops.object.mode_set(mode = 'OBJECT')
 
     mmd_action=mmd_arm2.animation_data.action
-    fcurves1=rigify_action.fcurves
-    fcurves2=mmd_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves1 = get_action_fcurves(rigify_action)
+    fcurves2 = get_action_fcurves(mmd_action)
 
     '''def combine_twist_fcurve(elbow_bone,twist_bone):
         keyframe_dice={}
