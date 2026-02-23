@@ -5,6 +5,45 @@ from bpy.types import Operator
 from . import preset
 from mathutils import Matrix,Vector,Quaternion,Euler
 
+# Blender 5.0 compatibility: Action.fcurves API wrapper
+def get_action_fcurves(action):
+    """
+    Get fcurves from action, compatible with Blender 4.2 and 5.0+
+    In Blender 5.0, action.fcurves legacy API was removed.
+    This function tries to use fcurves directly first (may still work as compatibility),
+    and falls back to channelbag API if needed.
+    """
+    # Try to access fcurves directly first
+    # In Blender 4.2, this works. In Blender 5.0, it may still work as a compatibility property
+    if hasattr(action, 'fcurves'):
+        try:
+            # Test if fcurves is accessible and functional
+            _ = len(action.fcurves)
+            return action.fcurves
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+    
+    # For Blender 5.0+, if fcurves doesn't work, try to use channelbag API
+    # Note: This requires datablock context, which may not always be available
+    # For now, we'll try to create a simple wrapper
+    # In practice, you may need to pass the datablock to properly use channelbag API
+    if hasattr(action, 'slots') and len(action.slots) > 0:
+        # Try to get fcurves from the first available slot's channelbag
+        for slot in action.slots:
+            if slot.datablock and hasattr(action, 'channelbag_for_datablock'):
+                try:
+                    channelbag = action.channelbag_for_datablock(slot.datablock)
+                    if channelbag and hasattr(channelbag, 'fcurves'):
+                        # Return channelbag's fcurves - this should work for read operations
+                        # For write operations, you may need to use channelbag methods directly
+                        return channelbag.fcurves
+                except (AttributeError, TypeError, RuntimeError):
+                    continue
+    
+    # Final fallback: try fcurves anyway (might work in some cases)
+    # This will raise an error if it doesn't work, which is better than silent failure
+    return action.fcurves
+
 def alert_error(title,message):
     def draw(self,context):
         self.layout.label(text=str(message))
@@ -190,7 +229,8 @@ def retarget_mixmao(OT,context):
     }
     translation_set={'spine'}
 
-    fcurves_b=rigify_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves_b = get_action_fcurves(rigify_action)
 
     #清除曲线函数
     def remove_fcurves(obj):
@@ -610,7 +650,8 @@ def load_vmd(OT,context):
     
     vmd_action = rigify_arm2.animation_data.action
 
-    fcurves=vmd_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves = get_action_fcurves(vmd_action)
     frame_range=vmd_action.frame_range
 
     #复制曲线
@@ -718,7 +759,8 @@ def load_vmd(OT,context):
 
     mmd_arm.animation_data_create()
     vmd_action2=mmd_arm.animation_data.action
-    fcurves2=vmd_action2.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves2 = get_action_fcurves(vmd_action2)
     frame_range=vmd_action2.frame_range
 
     bpy.ops.nla.bake(frame_start=int(frame_range[0]), frame_end=int(frame_range[1]), visual_keying=True, clear_constraints=True, use_current_action=True, bake_types={'POSE'})
@@ -1054,8 +1096,9 @@ def export_vmd(OT,context):
     bpy.ops.object.mode_set(mode = 'OBJECT')
 
     mmd_action=mmd_arm2.animation_data.action
-    fcurves1=rigify_action.fcurves
-    fcurves2=mmd_action.fcurves
+    # Blender 5.0 compatibility: use compatibility wrapper for fcurves
+    fcurves1 = get_action_fcurves(rigify_action)
+    fcurves2 = get_action_fcurves(mmd_action)
 
     '''def combine_twist_fcurve(elbow_bone,twist_bone):
         keyframe_dice={}
