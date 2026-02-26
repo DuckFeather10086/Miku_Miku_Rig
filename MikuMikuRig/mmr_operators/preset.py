@@ -36,7 +36,7 @@ mmd_bone_type_list=[
 rigify_bone_type_list=[
 'None',
 'Root',
-'spine','spine.001','spine.002','spine.003','spine.004','spine.006',
+'spine','spine.001','spine.002','spine.003','spine.004','spine.005','spine.006','spine.007',
 'eye.L','eye.R',
 'shoulder.L','upper_arm.L','ArmTwist_L','forearm.L','HandTwist_L','hand.L',
 'thumb.01.L','thumb.02.L','thumb.03.L',
@@ -51,13 +51,15 @@ rigify_bone_type_list=[
 'f_ring.01.R','f_ring.02.R','f_ring.03.R',
 'f_pinky.01.R','f_pinky.02.R','f_pinky.03.R',
 'thigh.L','shin.L','foot.L','toe.L',
+'toe_thumb.01.L','toe_thumb.02.L','toe_index.01.L','toe_index.02.L','toe_middle.01.L','toe_middle.02.L','toe_ring.01.L','toe_ring.02.L','toe_pinky.01.L','toe_pinky.02.L',
 'thigh.R','shin.R','foot.R','toe.R',
+'toe_thumb.01.R','toe_thumb.02.R','toe_index.01.R','toe_index.02.R','toe_middle.01.R','toe_middle.02.R','toe_ring.01.R','toe_ring.02.R','toe_pinky.01.R','toe_pinky.02.R',
 ]
 
 bone_translate_dict_C={
     'None': '无', 
     'Root': '根骨骼', 'Center': '中心（重定向用骨骼）', 'torso': '躯干控制器（重定向用骨骼）', 
-    'spine': '下半身', 'spine.001': '上半身0（非必要骨骼）', 'spine.002': '上半身1', 'spine.003': '上半身2', 'spine.004': '脖子', 'spine.006': '头', 'LowerBody':'下半身',
+    'spine': '下半身', 'spine.001': '上半身0（非必要骨骼）', 'spine.002': '上半身1', 'spine.003': '上半身2', 'spine.004': '脖子', 'spine.005': '上颈（非必要骨骼）', 'spine.006': '头顶（非必要骨骼）', 'spine.007': '头', 'LowerBody':'下半身',
     'eye.L': '左眼（非必要骨骼）', 'eye.R': '右眼（非必要骨骼）', 
     'shoulder.L': '左肩膀', 'upper_arm.L': '左大臂', 'ArmTwist_L': '左大臂扭转骨骼（非必要骨骼）', 'forearm.L': '左小臂', 'HandTwist_L': '左小臂扭转骨骼（ 非必要骨骼）', 'hand.L': '左手腕', 
     'thumb.01.L': '左手大拇指0', 'thumb.02.L': '左手大拇指1', 'thumb.03.L': '左手大拇指2', 
@@ -71,8 +73,12 @@ bone_translate_dict_C={
     'f_middle.01.R': '右手中指1', 'f_middle.02.R': '右手中指2', 'f_middle.03.R': '右手中指3', 
     'f_ring.01.R': '右手无名指1', 'f_ring.02.R': '右手无名指2', 'f_ring.03.R': '右手无名指3', 
     'f_pinky.01.R': '右手小拇指1', 'f_pinky.02.R': '右手小拇指2', 'f_pinky.03.R': '右手小拇指3', 
-    'thigh.L': '左大腿', 'shin.L': '左小腿', 'foot.L': '左脚掌', 'toe.L': '左脚尖（非必要骨骼）', 'LegIK_L': '左腿IK骨骼（重定向用骨骼）', 'ToeTipIK_L': '左脚掌IK骨骼（非必要骨骼）', 
-    'thigh.R': '右大腿', 'shin.R': '右小 腿', 'foot.R': '右脚掌', 'toe.R': '右脚尖（非必要骨骼）', 'LegIK_R': '右腿IK骨骼（非必要骨骼）', 'ToeTipIK_R': '右脚掌IK骨骼（重定向用骨骼）'
+    'thigh.L': '左大腿', 'shin.L': '左小腿', 'foot.L': '左脚掌', 'toe.L': '左脚尖（整根，非必要）', 
+    'toe_thumb.01.L': '左脚拇指1（非必要骨骼）', 'toe_thumb.02.L': '左脚拇指2（非必要骨骼）', 'toe_index.01.L': '左脚食趾1（非必要骨骼）', 'toe_index.02.L': '左脚食趾2（非必要骨骼）', 'toe_middle.01.L': '左脚中趾1（非必要骨骼）', 'toe_middle.02.L': '左脚中趾2（非必要骨骼）', 'toe_ring.01.L': '左脚无名趾1（非必要骨骼）', 'toe_ring.02.L': '左脚无名趾2（非必要骨骼）', 'toe_pinky.01.L': '左脚小趾1（非必要骨骼）', 'toe_pinky.02.L': '左脚小趾2（非必要骨骼）', 
+    'LegIK_L': '左腿IK骨骼（重定向用骨骼）', 'ToeTipIK_L': '左脚掌IK骨骼（非必要骨骼）', 
+    'thigh.R': '右大腿', 'shin.R': '右小腿', 'foot.R': '右脚掌', 'toe.R': '右脚尖（整根，非必要）', 
+    'toe_thumb.01.R': '右脚拇指1（非必要骨骼）', 'toe_thumb.02.R': '右脚拇指2（非必要骨骼）', 'toe_index.01.R': '右脚食趾1（非必要骨骼）', 'toe_index.02.R': '右脚食趾2（非必要骨骼）', 'toe_middle.01.R': '右脚中趾1（非必要骨骼）', 'toe_middle.02.R': '右脚中趾2（非必要骨骼）', 'toe_ring.01.R': '右脚无名趾1（非必要骨骼）', 'toe_ring.02.R': '右脚无名趾2（非必要骨骼）', 'toe_pinky.01.R': '右脚小趾1（非必要骨骼）', 'toe_pinky.02.R': '右脚小趾2（非必要骨骼）', 
+    'LegIK_R': '右腿IK骨骼（非必要骨骼）', 'ToeTipIK_R': '右脚掌IK骨骼（重定向用骨骼）'
     }
 
 built_in_rig_dict_list=['None','MMD_JP','MMD_EN','VRoid']
@@ -158,12 +164,12 @@ def read_json(preset_type):
         with open(json_path, 'r',encoding='utf-8') as f:
             preset_dict_dict=json.load(f)
     else:
-        with open(json_path, 'w') as f:
-            json.dump(preset_dict_dict, f, indent=4)
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(preset_dict_dict, f, indent=4, ensure_ascii=False)
 
 def write_json(preset_type):
     with open(json_path, "w", encoding='utf-8') as f:
-        json.dump(preset_dict_dict, f, indent=4)
+        json.dump(preset_dict_dict, f, indent=4, ensure_ascii=False)
 
 def add_preset(name,preset,preset_type='rig'):
     preset_dict=preset_dict_dict[preset_type]
