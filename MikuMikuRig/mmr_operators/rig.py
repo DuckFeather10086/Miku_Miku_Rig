@@ -11,9 +11,21 @@ def copy_bone_collections(source_bone: bpy.types.Bone, target_bone: bpy.types.Bo
         collection.assign(target_bone)
 
 def alert_error(title,message):
-    def draw(self,context):
-        self.layout.label(text=str(message))
-    bpy.context.window_manager.popup_menu(draw,title=title,icon='ERROR')
+    # 在无头模式下使用print，避免popup_menu导致崩溃
+    # 检查是否在无头模式下运行（没有窗口或区域）
+    is_headless = bpy.app.background or not bpy.context.area
+    if is_headless:
+        print(f"[{title}] {message}")
+    else:
+        try:
+            def draw(self,context):
+                self.layout.label(text=str(message))
+            if bpy.context.window_manager:
+                bpy.context.window_manager.popup_menu(draw,title=title,icon='ERROR')
+            else:
+                print(f"[{title}] {message}")
+        except:
+            print(f"[{title}] {message}")
 
 def check_arm():
     
@@ -46,12 +58,20 @@ def load_pose():
 
 def add_constraint3(constraint_List,preset_dict):
     global match_bone_nunber
+    global rig
+    global mmd_arm
+    global mmd_bones_list
     match_bone_nunber=0
     rig_bones_list=rig.data.bones.keys()
 
     index_list=[]
     bpy.ops.object.mode_set(mode = 'POSE')
 
+    # 调试：统计匹配情况
+    missing_in_preset = 0
+    missing_in_mmd = 0
+    missing_in_rig = 0
+    
     for i,tuple in enumerate(constraint_List):
         To=tuple[0]
         From=tuple[1]
@@ -59,6 +79,7 @@ def add_constraint3(constraint_List,preset_dict):
         location=tuple[3]
 
         if From not in preset_dict:
+            missing_in_preset += 1
             continue
 
         From=preset_dict[From]
@@ -67,32 +88,65 @@ def add_constraint3(constraint_List,preset_dict):
             match_bone_nunber+=1
             index_list.append(i)
             mmd_arm.data.bones[From].hide=False
+        else:
+            # 调试信息：记录为什么没有匹配
+            if From not in mmd_bones_list:
+                missing_in_mmd += 1
+            elif To not in rig_bones_list:
+                missing_in_rig += 1
+    
+    # 输出调试信息
+    print(f"约束匹配统计: 总约束数={len(constraint_List)}, 匹配={match_bone_nunber}, 预设中缺失={missing_in_preset}, MMD骨骼缺失={missing_in_mmd}, Rig骨骼缺失={missing_in_rig}")
 
+    # 确保rig是活动对象并切换到EDIT模式
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
     bpy.ops.object.mode_set(mode = 'EDIT')
 
     for i in index_list:
         From = preset_dict[constraint_List[i][1]]
         From1=constraint_List[i][1]
         To = constraint_List[i][0]
+        
+        # 检查To骨骼是否存在
+        if To not in rig.data.edit_bones:
+            continue
+            
         parent_name=From1 + '_parent'
         parent_bone=rig.data.edit_bones.new(name=parent_name)
         parent_bone.matrix=mmd_arm.pose.bones[From].matrix
         parent_bone.tail=mmd_arm.pose.bones[From].tail
         parent_bone.parent=rig.data.edit_bones[To]
-        copy_bone_collections(rig.data.bones[To], parent_bone)
+        if To in rig.data.bones:
+            copy_bone_collections(rig.data.bones[To], parent_bone)
 
+    # 先退出rig的EDIT模式，确保新建的*_parent骨骼提交到rig.data.bones
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode = 'OBJECT')
+
+    # 确保mmd_arm是活动对象以便添加约束
+    bpy.context.view_layer.objects.active = mmd_arm
+    mmd_arm.select_set(True)
     bpy.ops.object.mode_set(mode = 'POSE')
 
+    created_rel_constraints = 0
     for i in index_list:
         From = preset_dict[constraint_List[i][1]]
         From1=constraint_List[i][1]
         To = constraint_List[i][0]
         rotation=constraint_List[i][2]
         location=constraint_List[i][3]
+        parent_name=From1 + '_parent'
+        
+        # 检查骨骼是否存在
+        if From not in mmd_arm.pose.bones:
+            continue
+        if parent_name not in rig.data.bones:
+            continue
+            
         con= mmd_arm.pose.bones[From].constraints
         for c in con:
             c.mute=True
-        parent_name=From1 + '_parent'
         rig.data.bones[parent_name].hide=True
         if location:
             if rotation:
@@ -103,17 +157,21 @@ def add_constraint3(constraint_List,preset_dict):
                 COPY_TRANSFORMS.mix_mode = 'REPLACE'
                 COPY_TRANSFORMS.owner_space = 'WORLD'
                 COPY_TRANSFORMS.target_space = 'WORLD'
+                created_rel_constraints += 1
             else:
                 COPY_LOCATION=mmd_arm.pose.bones[From].constraints.new(type='COPY_LOCATION')
                 COPY_LOCATION.target = rig
                 COPY_LOCATION.subtarget = parent_name
                 COPY_LOCATION.name="rel_location"
+                created_rel_constraints += 1
         else:
             if rotation:
                 COPY_TRANSFORMS=con.new(type='COPY_ROTATION')
                 COPY_TRANSFORMS.target = rig
                 COPY_TRANSFORMS.subtarget = parent_name
                 COPY_TRANSFORMS.name="rel_rotation"
+                created_rel_constraints += 1
+    print(f"rel约束创建数: {created_rel_constraints}")
 
 def RIG2(context):
 
@@ -123,8 +181,11 @@ def RIG2(context):
     global mmd_bones_list
     global rig_bones_list
 
-    area = bpy.context.area.type
-    context.area.type = 'VIEW_3D'
+    # Handle headless mode (no area available)
+    area = None
+    if bpy.context.area:
+        area = bpy.context.area.type
+        context.area.type = 'VIEW_3D'
 
     mmd_arm=context.view_layer.objects.active
     extra.set_min_ik_loop(mmd_arm,10)
@@ -154,7 +215,10 @@ def RIG2(context):
     for bone in mmd_arm.pose.bones:
         name=bone.name
         if bone.mmr_bone.bone_type !='None':
-            preset_dict[bone.mmr_bone.bone_type]=bone.name
+            # 同一bone_type可能在预设里出现多次（例如 neck1/neck2 -> spine.005），
+            # 这里保留首个映射，避免后写覆盖导致上段骨骼丢失绑定。
+            if bone.mmr_bone.bone_type not in preset_dict:
+                preset_dict[bone.mmr_bone.bone_type]=bone.name
         if bone.mmr_bone.bone_type in unconnect_bone:
             mmd_arm.data.edit_bones[name].use_connect = False
 
@@ -188,56 +252,127 @@ def RIG2(context):
     #import metarig armature
     rigify_arm_name="MMR_Rig_relative4"
     
+    # 先清理可能存在的旧对象
+    if rigify_arm_name in bpy.data.objects:
+        old_obj = bpy.data.objects[rigify_arm_name]
+        bpy.data.objects.remove(old_obj, do_unlink=True)
+    
     with bpy.data.libraries.load(rigify_blend_file) as (data_from, data_to):
         data_to.objects = [rigify_arm_name]
 
     rigify_arm=data_to.objects[0]
     context.collection.objects.link(rigify_arm)
+    
+    # 修复 bone collection 引用问题
+    # 在加载后立即检查并修复所有无效的 bone collection 引用
+    try:
+        bpy.context.view_layer.objects.active = rigify_arm
+        bpy.ops.object.mode_set(mode = 'EDIT')
+        
+        # 获取所有有效的骨骼名称
+        valid_bone_names = set(rigify_arm.data.edit_bones.keys())
+        
+        # 切换到 OBJECT 模式来访问 bone collections
+        bpy.ops.object.mode_set(mode = 'OBJECT')
+        
+        # 检查并修复所有 bone collections
+        for collection in list(rigify_arm.data.collections_all):
+            if collection:
+                # 获取 collection 中的所有骨骼引用
+                bones_to_remove = []
+                for bone in list(collection.bones):
+                    if bone and (bone.name not in valid_bone_names):
+                        bones_to_remove.append(bone)
+                
+                # 移除无效的骨骼引用
+                for bone in bones_to_remove:
+                    try:
+                        collection.unassign(bone)
+                        print(f"✓ 移除了无效的 bone collection 引用: {collection.name} -> {bone.name if hasattr(bone, 'name') else 'Unknown'}")
+                    except Exception as e:
+                        print(f"⚠ 无法移除无效的 bone collection 引用: {e}")
+    except Exception as e:
+        print(f"⚠ 警告: 修复 bone collection 时出错: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # 修复脊柱/头部 rigify_type：
+    # 保持 spine.005 为 super_head 起点（metarig 正确结构）。
+    bpy.context.view_layer.objects.active = rigify_arm
+    bpy.ops.object.mode_set(mode = 'POSE')
+    if "spine.005" in rigify_arm.pose.bones and hasattr(rigify_arm.pose.bones["spine.005"], 'rigify_type'):
+        spine5_type = str(rigify_arm.pose.bones["spine.005"].rigify_type)
+        if spine5_type != 'spines.super_head':
+            rigify_arm.pose.bones["spine.005"].rigify_type = 'spines.super_head'
+            print(f"✓ 修复 spine.005 的 rigify_type: {spine5_type} -> spines.super_head")
+    bpy.ops.object.mode_set(mode = 'OBJECT')
 
     #检测手指弯曲
     mmd_bones=mmd_arm.pose.bones
     rigify_bone=rigify_arm.pose.bones
     bent_finger=False
-    finger_name1=preset_dict['f_index.01.L']
-    finger_name2=preset_dict['f_index.02.L']
-    finger_name3=preset_dict['f_index.03.L']
-    finger_bone1=mmd_bones[finger_name1]
-    finger_bone2=mmd_bones[finger_name2]
-    finger_bone3=mmd_bones[finger_name3]
-    finger_v1=finger_bone2.head-finger_bone1.head
-    finger_v2=finger_bone3.head-finger_bone2.head
-    finger_angle=finger_v1.angle(finger_v2)
-    print('finger angle='+str(finger_angle))
-    bent_finger = finger_angle>0.26
-    if bent_finger:
-        finger_list=['f_index.01.L','f_middle.01.L','f_ring.01.L','f_pinky.01.L','f_index.01.R','f_middle.01.R','f_ring.01.R','f_pinky.01.R','thumb.01.L','thumb.01.R',]
-        for name in finger_list:
-            bone=rigify_bone[name]
-            bone.rigify_parameters.primary_rotation_axis='automatic'
+    if 'f_index.01.L' in preset_dict and 'f_index.02.L' in preset_dict and 'f_index.03.L' in preset_dict:
+        finger_name1=preset_dict['f_index.01.L']
+        finger_name2=preset_dict['f_index.02.L']
+        finger_name3=preset_dict['f_index.03.L']
+        if finger_name1 in mmd_bones and finger_name2 in mmd_bones and finger_name3 in mmd_bones:
+            finger_bone1=mmd_bones[finger_name1]
+            finger_bone2=mmd_bones[finger_name2]
+            finger_bone3=mmd_bones[finger_name3]
+            finger_v1=finger_bone2.head-finger_bone1.head
+            finger_v2=finger_bone3.head-finger_bone2.head
+            finger_angle=finger_v1.angle(finger_v2)
+            print('finger angle='+str(finger_angle))
+            bent_finger = finger_angle>0.26
+            if bent_finger:
+                finger_list=['f_index.01.L','f_middle.01.L','f_ring.01.L','f_pinky.01.L','f_index.01.R','f_middle.01.R','f_ring.01.R','f_pinky.01.R','thumb.01.L','thumb.01.R',]
+                for name in finger_list:
+                    if name in rigify_bone:
+                        bone=rigify_bone[name]
+                        bone.rigify_parameters.primary_rotation_axis='automatic'
     #检测手臂弯曲
     bent_arm=False
-    arm_name1=preset_dict['upper_arm.L']
-    arm_name2=preset_dict['forearm.L']
-    arm_name3=preset_dict['hand.L']
-    arm_bone1=mmd_bones[arm_name1]
-    arm_bone2=mmd_bones[arm_name2]
-    arm_bone3=mmd_bones[arm_name3]
-    arm_v1=arm_bone2.head-arm_bone1.head
-    arm_v2=arm_bone3.head-arm_bone2.head
-    arm_angle=arm_v1.angle(arm_v2)
-    print('arm angle='+str(finger_angle))
-    bent_arm = arm_angle>0.26
-    if bent_arm:
-        arm_list=['upper_arm.L','upper_arm.R']
-        for name in arm_list:
-            bone=rigify_bone[name]
-            bone.rigify_parameters.primary_rotation_axis='automatic'
+    if 'upper_arm.L' in preset_dict and 'forearm.L' in preset_dict and 'hand.L' in preset_dict:
+        arm_name1=preset_dict['upper_arm.L']
+        arm_name2=preset_dict['forearm.L']
+        arm_name3=preset_dict['hand.L']
+        if arm_name1 in mmd_bones and arm_name2 in mmd_bones and arm_name3 in mmd_bones:
+            arm_bone1=mmd_bones[arm_name1]
+            arm_bone2=mmd_bones[arm_name2]
+            arm_bone3=mmd_bones[arm_name3]
+            arm_v1=arm_bone2.head-arm_bone1.head
+            arm_v2=arm_bone3.head-arm_bone2.head
+            arm_angle=arm_v1.angle(arm_v2)
+            print('arm angle='+str(arm_angle))
+            bent_arm = arm_angle>0.26
+            if bent_arm:
+                arm_list=['upper_arm.L','upper_arm.R']
+                for name in arm_list:
+                    if name in rigify_bone:
+                        bone=rigify_bone[name]
+                        bone.rigify_parameters.primary_rotation_axis='automatic'
 
     #自动缩放（头骨为 spine.007 时用 spine.007，否则 spine.006）
     head_key = 'spine.007' if 'spine.007' in preset_dict else 'spine.006'
-    rigify_head = head_key if head_key in rigify_arm.data.edit_bones else 'spine.006'
-    scale=(mmd_arm.pose.bones[preset_dict[head_key]].head[2]*mmd_arm.scale[2])/(rigify_arm.pose.bones[rigify_head].head[2]*rigify_arm.scale[2])
-    rigify_arm.scale*=scale
+    if head_key not in preset_dict:
+        # 如果都没有，尝试其他可能的头部骨骼
+        for key in ['spine.005', 'spine.004', 'Head', 'head']:
+            if key in preset_dict:
+                head_key = key
+                break
+        else:
+            # 如果都找不到，使用默认缩放
+            head_key = None
+    
+    if head_key and head_key in preset_dict:
+        rigify_head = head_key if head_key in rigify_arm.data.edit_bones else 'spine.006'
+        if rigify_head in rigify_arm.pose.bones and preset_dict[head_key] in mmd_arm.pose.bones:
+            scale=(mmd_arm.pose.bones[preset_dict[head_key]].head[2]*mmd_arm.scale[2])/(rigify_arm.pose.bones[rigify_head].head[2]*rigify_arm.scale[2])
+            rigify_arm.scale*=scale
+        else:
+            print(f"⚠ 警告: 无法计算缩放，使用默认大小")
+    else:
+        print(f"⚠ 警告: 未找到头部骨骼，使用默认大小")
 
     bpy.ops.object.select_all(action='DESELECT')
     context.view_layer.objects.active=rigify_arm
@@ -289,12 +424,31 @@ def RIG2(context):
     if rigify_arm.data.edit_bones["spine.001"].tail==rigify_arm.data.edit_bones["spine.003"].head:
         rigify_arm.data.edit_bones["spine.001"].tail[2]-=0.01
 
-    # spine.005 可选；头为 spine.007 或 spine.006
+    # 正确脊柱/颈椎结构：
+    # basic_spine: spine -> ... -> spine.004
+    # super_head: spine.005 -> spine.006 -> spine.007
+    # 关键是 spine.005 与 spine.004 需同父链但不连接，避免 basic_spine 抢占 super_head。
     if "spine.005" in rigify_arm.data.edit_bones:
-        if rigify_arm.data.edit_bones["spine.004"].tail==rigify_arm.data.edit_bones["spine.006"].head:
-            rigify_arm.data.edit_bones["spine.004"].tail[2]-=0.01
-        if rigify_arm.data.edit_bones["spine.005"].tail==rigify_arm.data.edit_bones["spine.006"].head:
-            rigify_arm.data.edit_bones["spine.005"].tail[2]-=0.01
+        spine_004 = rigify_arm.data.edit_bones["spine.004"]
+        spine_005 = rigify_arm.data.edit_bones["spine.005"]
+        spine_006 = rigify_arm.data.edit_bones["spine.006"]
+        
+        # spine.005 是 neck1 起点，挂在 spine.004 下但不连接（切断 basic_spine 连续链）
+        spine_005.parent = spine_004
+        spine_005.use_connect = False
+        # 但空间上保持连续，避免 super_head 链判定为 disjoint
+        spine_005.head = spine_004.tail.copy()
+
+        # neck 内部保持连续：005 -> 006 -> 007
+        spine_005.tail = spine_006.head.copy()
+        spine_006.parent = spine_005
+        spine_006.use_connect = True
+        
+        # 如果位置重叠，稍微调整
+        if spine_004.tail == spine_006.head:
+            spine_004.tail[2] -= 0.01
+        if spine_005.tail == spine_006.head:
+            spine_005.tail[2] -= 0.01
     elif rigify_arm.data.edit_bones["spine.004"].tail==rigify_arm.data.edit_bones["spine.006"].head:
         rigify_arm.data.edit_bones["spine.004"].tail[2]-=0.01
 
@@ -310,6 +464,15 @@ def RIG2(context):
 
     rigify_arm.data.edit_bones["hand.L"].tail=(rigify_arm.data.edit_bones["f_middle.01.L"].head+rigify_arm.data.edit_bones["f_ring.01.L"].head)/2
     rigify_arm.data.edit_bones["hand.R"].tail=(rigify_arm.data.edit_bones["f_middle.01.R"].head+rigify_arm.data.edit_bones["f_ring.01.R"].head)/2
+
+    # Genesis9 预设通常只有 toe.L/toe.R；补齐 ToeTipIK 映射，避免 toe 控制器失配
+    if "toe.L" in preset_dict and "ToeTipIK_L" not in preset_dict:
+        preset_dict["ToeTipIK_L"] = preset_dict["toe.L"]
+    if "toe.R" in preset_dict and "ToeTipIK_R" not in preset_dict:
+        preset_dict["ToeTipIK_R"] = preset_dict["toe.R"]
+
+    # 不再把 spine.006 自动复制给 spine.007。
+    # 由预设显式指定：spine.004=chest, spine.005/006=neck1/neck2, spine.007=head
 
     if 'ToeTipIK_L' in preset_dict and "toe.L" not in preset_dict and "toe_thumb.01.L" not in preset_dict:
         rigify_arm.data.edit_bones["toe.L"].head=mmd_arm.pose.bones[preset_dict['ToeTipIK_L']].head
@@ -437,7 +600,8 @@ def RIG2(context):
 
     #生成控制器
     if mmr_property.debug:
-        bpy.context.area.type = area
+        if area and bpy.context.area:
+            bpy.context.area.type = area
         return
 
     bpy.ops.object.mode_set(mode = 'OBJECT')
@@ -445,14 +609,109 @@ def RIG2(context):
     context.view_layer.objects.active=rigify_arm
     rigify_arm.select_set(True)
 
-    bpy.ops.armature.rigify_upgrade_layers()
+    # NOTE: On Blender 5.x this may create stale collection refs on some legacy metarigs.
+    # Keep disabled in headless flow to avoid "Broken bone collection reference" during generation.
+    # bpy.ops.armature.rigify_upgrade_layers()
     # bpy.ops.pose.rigify_upgrade_face()
+    
+    # 修复可能的 bone collection 引用问题
+    # 确保所有 bone collection 引用都是有效的
+    try:
+        # 检查并修复 bone collection 引用
+        # 如果 collection 中有无效的骨骼引用，需要清理
+        for collection in list(rigify_arm.data.collections_all):
+            if collection and hasattr(collection, 'bones'):
+                # 检查 collection 中的骨骼是否都有效
+                invalid_bones = []
+                for bone in list(collection.bones):
+                    if bone and bone.name not in rigify_arm.data.bones:
+                        invalid_bones.append(bone)
+                # 移除无效的骨骼引用
+                for bone in invalid_bones:
+                    try:
+                        collection.unassign(bone)
+                        print(f"✓ 移除了无效的 bone collection 引用: {bone.name if bone else 'None'}")
+                    except Exception as e:
+                        print(f"⚠ 无法移除无效的 bone collection 引用: {e}")
+    except Exception as e:
+        print(f"⚠ 警告: 检查 bone collection 时出错: {e}")
+        import traceback
+        traceback.print_exc()
 
-    bpy.ops.pose.rigify_generate()
+    # Switch to POSE mode before generating rig
+    # 确保上下文正确设置
+    bpy.ops.object.mode_set(mode = 'POSE')
+    
+    # 再次确保活动对象和选择正确
+    context.view_layer.objects.active = rigify_arm
+    rigify_arm.select_set(True)
+    
+    # 原始代码直接调用bpy.ops.pose.rigify_generate()
+    # 在无头模式下，如果poll失败，尝试使用EXEC_DEFAULT或直接调用内部函数
+    try:
+        # 原始方式：直接调用（GUI模式下工作正常）
+        bpy.ops.pose.rigify_generate()
+    except RuntimeError as e:
+        if "poll() failed" in str(e):
+            # 在无头模式下，poll可能失败，尝试使用EXEC_DEFAULT
+            print("⚠ 警告: rigify_generate.poll()失败，尝试使用EXEC_DEFAULT...")
+            try:
+                bpy.ops.pose.rigify_generate(execution_context='EXEC_DEFAULT')
+            except Exception as exec_e:
+                # 最后尝试：直接调用rigify的内部函数
+                print(f"⚠ EXEC_DEFAULT失败 ({exec_e})，尝试直接调用rigify内部函数...")
+                try:
+                    import rigify.generate
+                    # 直接调用rigify内部函数
+                    rigify.generate.generate_rig(context, rigify_arm)
+                except ImportError:
+                    print("✗ 无法导入rigify.generate模块")
+                    raise RuntimeError(f"无法执行rigify_generate: {exec_e}")
+                except Exception as inner_e:
+                    print(f"✗ rigify内部函数调用失败: {inner_e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise RuntimeError(f"无法执行rigify_generate: {exec_e}")
+        else:
+            raise
+    
+    # 获取生成的rig
+    # rigify_generate会替换metarig，所以活动对象应该就是生成的rig
     rig=context.view_layer.objects.active
+    
+    # rigify_generate会直接替换metarig，所以rig应该就是原来的rigify_arm（但内容已替换）
+    # 验证rig是否有DEF骨骼和控制器骨骼（rigify生成的rig应该有这些）
+    if rig and hasattr(rig, 'data') and hasattr(rig.data, 'bones'):
+        def_bones = [b for b in rig.data.bones if 'DEF-' in b.name]
+        # 检查控制器骨骼（不包括ORG-前缀的）
+        controller_bones = [b for b in rig.data.bones if not b.name.startswith('ORG-') and not b.name.startswith('MCH-') and not b.name.startswith('DEF-') and any(x in b.name for x in ['root', 'torso', 'spine_fk', 'hand_ik', 'foot_ik', 'upper_arm', 'thigh', 'shoulder', 'Center'])]
+        
+        if len(def_bones) == 0:
+            print(f"⚠ 警告: 生成的rig没有DEF骨骼，rigify生成可能不完整")
+            print(f"   Rig骨骼总数: {len(rig.data.bones)}")
+            print(f"   前20个骨骼: {[b.name for b in list(rig.data.bones)[:20]]}")
+            print(f"   控制器骨骼数: {len(controller_bones)}")
+            if len(controller_bones) > 0:
+                print(f"   控制器骨骼: {[b.name for b in controller_bones[:20]]}")
+            print(f"⚠ 重要: 在无头模式下，rigify可能无法完整生成。建议在GUI模式下测试！")
+        else:
+            print(f"✓ Rig包含 {len(def_bones)} 个DEF骨骼, {len(controller_bones)} 个控制器骨骼")
+    
+    # 确保rig在场景中
+    if rig and rig.name not in context.scene.objects:
+        context.collection.objects.link(rig)
+        print(f"✓ 已将生成的rig添加到场景: {rig.name}")
+    
+    # 确保rig在view_layer中可见
+    if rig:
+        rig.hide_set(False)
+        rig.hide_viewport = False
 
-    #删除无用骨架
-    bpy.data.objects.remove(rigify_arm,do_unlink=True)
+    #删除无用骨架（只有在rig不是metarig时才删除）
+    if rig != rigify_arm:
+        bpy.data.objects.remove(rigify_arm,do_unlink=True)
+    else:
+        print("⚠ 警告: rigify生成后活动对象仍然是metarig，可能生成失败")
 
 
     #开始调整生成的控制器
@@ -463,49 +722,59 @@ def RIG2(context):
     #肩膀联动
 
     if mmr_property.auto_shoulder:
-        bpy.ops.object.mode_set(mode = 'EDIT')
-        auto_shulder_L=Center=rig.data.edit_bones.new(name='auto_shulder_L')
-        auto_shulder_L.head=rig.data.edit_bones['shoulder.L'].head
-        auto_shulder_L.tail=rig.data.edit_bones['shoulder.L'].tail
-        auto_shulder_L.roll=rig.data.edit_bones['shoulder.L'].roll
-        auto_shulder_L.parent=rig.data.edit_bones['upper_arm_ik.L']
+        # 检查必要的骨骼是否存在
+        if 'shoulder.L' not in rig.data.edit_bones or 'upper_arm_ik.L' not in rig.data.edit_bones:
+            print("⚠ 警告: 缺少必要的骨骼，跳过肩膀联动设置")
+        elif 'shoulder.R' not in rig.data.edit_bones or 'upper_arm_ik.R' not in rig.data.edit_bones:
+            print("⚠ 警告: 缺少必要的骨骼，跳过肩膀联动设置")
+        else:
+            bpy.ops.object.mode_set(mode = 'EDIT')
+            auto_shulder_L=Center=rig.data.edit_bones.new(name='auto_shulder_L')
+            auto_shulder_L.head=rig.data.edit_bones['shoulder.L'].head
+            auto_shulder_L.tail=rig.data.edit_bones['shoulder.L'].tail
+            auto_shulder_L.roll=rig.data.edit_bones['shoulder.L'].roll
+            auto_shulder_L.parent=rig.data.edit_bones['upper_arm_ik.L']
 
-        auto_shulder_R=Center=rig.data.edit_bones.new(name='auto_shulder_R')
-        auto_shulder_R.head=rig.data.edit_bones['shoulder.R'].head
-        auto_shulder_R.tail=rig.data.edit_bones['shoulder.R'].tail
-        auto_shulder_R.roll=rig.data.edit_bones['shoulder.R'].roll
-        auto_shulder_R.parent=rig.data.edit_bones['upper_arm_ik.R']
+            auto_shulder_R=Center=rig.data.edit_bones.new(name='auto_shulder_R')
+            auto_shulder_R.head=rig.data.edit_bones['shoulder.R'].head
+            auto_shulder_R.tail=rig.data.edit_bones['shoulder.R'].tail
+            auto_shulder_R.roll=rig.data.edit_bones['shoulder.R'].roll
+            auto_shulder_R.parent=rig.data.edit_bones['upper_arm_ik.R']
 
-        bpy.ops.object.mode_set(mode = 'POSE')
-        shoulder_L=rig.pose.bones["shoulder.L"]
-        auto_shulder_L=rig.pose.bones["auto_shulder_L"]
-        shoulder_L_c=shoulder_L.constraints.new('COPY_ROTATION')
-        shoulder_L_c.name='MMR_auto_shoulder'
-        shoulder_L_c.target=rig
-        shoulder_L_c.subtarget='auto_shulder_L'
-        shoulder_L_c.influence=0.5
-        auto_shoulder_L_c=auto_shulder_L.constraints.new('LIMIT_ROTATION')
-        auto_shoulder_L_c.name='MMR_auto_shoulder'
-        auto_shoulder_L_c.use_limit_x=True
-        auto_shoulder_L_c.min_x = -0.35
-        auto_shoulder_L_c.max_x = 1.57
-        auto_shoulder_L_c.owner_space = 'LOCAL_WITH_PARENT'
-        copy_bone_collections(rig.data.bones["ORG-shoulder.L"], auto_shulder_L.bone)
+            bpy.ops.object.mode_set(mode = 'POSE')
+            if "shoulder.L" in rig.pose.bones and "auto_shulder_L" in rig.pose.bones:
+                shoulder_L=rig.pose.bones["shoulder.L"]
+                auto_shulder_L=rig.pose.bones["auto_shulder_L"]
+                shoulder_L_c=shoulder_L.constraints.new('COPY_ROTATION')
+                shoulder_L_c.name='MMR_auto_shoulder'
+                shoulder_L_c.target=rig
+                shoulder_L_c.subtarget='auto_shulder_L'
+                shoulder_L_c.influence=0.5
+                auto_shoulder_L_c=auto_shulder_L.constraints.new('LIMIT_ROTATION')
+                auto_shoulder_L_c.name='MMR_auto_shoulder'
+                auto_shoulder_L_c.use_limit_x=True
+                auto_shoulder_L_c.min_x = -0.35
+                auto_shoulder_L_c.max_x = 1.57
+                auto_shoulder_L_c.owner_space = 'LOCAL_WITH_PARENT'
+                if "ORG-shoulder.L" in rig.data.bones:
+                    copy_bone_collections(rig.data.bones["ORG-shoulder.L"], auto_shulder_L.bone)
 
-        shoulder_R=rig.pose.bones["shoulder.R"]
-        auto_shulder_R=rig.pose.bones["auto_shulder_R"]
-        shoulder_R_c=shoulder_R.constraints.new('COPY_ROTATION')
-        shoulder_R_c.name='MMR_auto_shoulder'
-        shoulder_R_c.target=rig
-        shoulder_R_c.subtarget='auto_shulder_R'
-        shoulder_R_c.influence=0.5
-        auto_shoulder_R_c=auto_shulder_R.constraints.new('LIMIT_ROTATION')
-        auto_shoulder_R_c.name='MMR_auto_shoulder'
-        auto_shoulder_R_c.use_limit_x=True
-        auto_shoulder_R_c.min_x = -0.35
-        auto_shoulder_R_c.max_x = 1.57
-        auto_shoulder_R_c.owner_space = 'LOCAL_WITH_PARENT'
-        copy_bone_collections(rig.data.bones["ORG-shoulder.R"], auto_shulder_R.bone)
+            if "shoulder.R" in rig.pose.bones and "auto_shulder_R" in rig.pose.bones:
+                shoulder_R=rig.pose.bones["shoulder.R"]
+                auto_shulder_R=rig.pose.bones["auto_shulder_R"]
+                shoulder_R_c=shoulder_R.constraints.new('COPY_ROTATION')
+                shoulder_R_c.name='MMR_auto_shoulder'
+                shoulder_R_c.target=rig
+                shoulder_R_c.subtarget='auto_shulder_R'
+                shoulder_R_c.influence=0.5
+                auto_shoulder_R_c=auto_shulder_R.constraints.new('LIMIT_ROTATION')
+                auto_shoulder_R_c.name='MMR_auto_shoulder'
+                auto_shoulder_R_c.use_limit_x=True
+                auto_shoulder_R_c.min_x = -0.35
+                auto_shoulder_R_c.max_x = 1.57
+                auto_shoulder_R_c.owner_space = 'LOCAL_WITH_PARENT'
+                if "ORG-shoulder.R" in rig.data.bones:
+                    copy_bone_collections(rig.data.bones["ORG-shoulder.R"], auto_shulder_R.bone)
 
     #上半身控制器
 
@@ -516,7 +785,16 @@ def RIG2(context):
         Center.tail=rig.data.edit_bones['root'].tail
         Center.roll=rig.data.edit_bones['root'].roll
         Center.length=rig.data.edit_bones['root'].length/3
-        Center.head[2]=Center.tail[2]=rig.data.edit_bones['shin_fk.L'].head[2]
+        # 检查shin_fk.L是否存在，如果不存在则使用其他参考点
+        if 'shin_fk.L' in rig.data.edit_bones:
+            Center.head[2]=Center.tail[2]=rig.data.edit_bones['shin_fk.L'].head[2]
+        elif 'shin.L' in rig.data.edit_bones:
+            Center.head[2]=Center.tail[2]=rig.data.edit_bones['shin.L'].head[2]
+        elif 'thigh.L' in rig.data.edit_bones:
+            Center.head[2]=Center.tail[2]=rig.data.edit_bones['thigh.L'].head[2]
+        else:
+            # 使用root作为参考
+            Center.head[2]=Center.tail[2]=rig.data.edit_bones['root'].head[2]
 
         '''Groove=rig.data.edit_bones.new(name='Groove')
         Groove.head=rig.data.edit_bones['root'].head
@@ -528,29 +806,71 @@ def RIG2(context):
         else:
             Groove.head[2]=Groove.tail[2]=rig.data.edit_bones['shin_fk.L'].head[2]'''
 
-        rig.data.edit_bones['MCH-torso.parent'].parent=Center
-        rig.data.edit_bones['MCH-hand_ik.parent.L'].parent=Center
-        rig.data.edit_bones['MCH-hand_ik.parent.R'].parent=Center
+        # 检查这些骨骼是否存在
+        if 'MCH-torso.parent' in rig.data.edit_bones:
+            rig.data.edit_bones['MCH-torso.parent'].parent=Center
+        if 'MCH-hand_ik.parent.L' in rig.data.edit_bones:
+            rig.data.edit_bones['MCH-hand_ik.parent.L'].parent=Center
+        if 'MCH-hand_ik.parent.R' in rig.data.edit_bones:
+            rig.data.edit_bones['MCH-hand_ik.parent.R'].parent=Center
         #Groove.parent=Center
-        Center.parent=rig.data.edit_bones['root']
+        if 'root' in rig.data.edit_bones:
+            Center.parent=rig.data.edit_bones['root']
         
         bpy.ops.object.mode_set(mode = 'POSE')
         ''' Groove=rig.pose.bones["Groove"]
         Groove.custom_shape = bpy.data.objects["WGT-rig_root"]
         Groove.mmd_bone.name_j='グルーブ'''
-        rig.pose.bones["upper_arm_parent.L"]["IK_parent"] = 0
-        rig.pose.bones["upper_arm_parent.R"]["IK_parent"] = 0
-        rig.pose.bones["torso"]["torso_parent"] = 0
+        # 检查这些骨骼和属性是否存在
+        if "upper_arm_parent.L" in rig.pose.bones and "IK_parent" in rig.pose.bones["upper_arm_parent.L"]:
+            rig.pose.bones["upper_arm_parent.L"]["IK_parent"] = 0
+        if "upper_arm_parent.R" in rig.pose.bones and "IK_parent" in rig.pose.bones["upper_arm_parent.R"]:
+            rig.pose.bones["upper_arm_parent.R"]["IK_parent"] = 0
+        if "torso" in rig.pose.bones and "torso_parent" in rig.pose.bones["torso"]:
+            rig.pose.bones["torso"]["torso_parent"] = 0
         #Groove.bone.layers=rig.data.bones["torso"].layers
         #Groove.bone_group = rig.pose.bone_groups['Special'] 
-        Center=rig.pose.bones["Center"]
-        #Center.mmd_bone.name_j='センター'
-        Center.custom_shape = rig.pose.bones["root"].custom_shape
-        copy_bone_collections(rig.data.bones["torso"], Center.bone)
+        if "Center" in rig.pose.bones:
+            Center=rig.pose.bones["Center"]
+            #Center.mmd_bone.name_j='センター'
+            if "root" in rig.pose.bones and rig.pose.bones["root"].custom_shape:
+                Center.custom_shape = rig.pose.bones["root"].custom_shape
+            if "torso" in rig.data.bones:
+                copy_bone_collections(rig.data.bones["torso"], Center.bone)
         # Center.bone_group = rig.pose.bone_groups['Special'] 
     else:
         #rig.pose.bones['MCH-torso.parent'].mmd_bone.name_j='グルーブ'
         pass
+
+    # 将 chest 控制器对齐到 spine.004 控制位
+    # 目的：让用户直觉上的 chest 操作点与 spine.004 一致。
+    bpy.ops.object.mode_set(mode = 'EDIT')
+    if "chest" in rig.data.edit_bones and "spine_fk.004" in rig.data.edit_bones:
+        chest_eb = rig.data.edit_bones["chest"]
+        spine4_eb = rig.data.edit_bones["spine_fk.004"]
+        chest_eb.head = spine4_eb.head.copy()
+        chest_eb.tail = spine4_eb.tail.copy()
+        chest_eb.roll = spine4_eb.roll
+
+    # 让 neck/head 控制器首尾连接（connected），并统一 head 控制器尺寸
+    if "neck" in rig.data.edit_bones and "head" in rig.data.edit_bones:
+        neck_eb = rig.data.edit_bones["neck"]
+        head_eb = rig.data.edit_bones["head"]
+        head_eb.parent = neck_eb
+        head_eb.use_connect = True
+        head_eb.head = neck_eb.tail.copy()
+    bpy.ops.object.mode_set(mode = 'POSE')
+
+    # 头控形状过大时按 neck/head 长度比自动缩放
+    if "neck" in rig.pose.bones and "head" in rig.pose.bones:
+        neck_pb = rig.pose.bones["neck"]
+        head_pb = rig.pose.bones["head"]
+        if head_pb.custom_shape:
+            if head_pb.length > 1e-6 and neck_pb.length > 1e-6:
+                ratio = neck_pb.length / head_pb.length
+                # 经验范围：0.45~0.8，避免过小或过大
+                scale = max(0.45, min(0.8, ratio * 1.2))
+                head_pb.custom_shape_scale_xyz = (scale, scale, scale)
 
     #添加约束
     #add constraint
@@ -578,8 +898,8 @@ def RIG2(context):
         ("DEF-foot.R","foot.R",True,True),
         ("DEF-foot.L","LegIK_L",True,True),
         ("DEF-foot.R","LegIK_R",True,True),
-        ("DEF-toe.L","toe.L",True,False),
-        ("DEF-toe.R","toe.R",True,False),
+        ("DEF-toe.L","toe.L",True,True),
+        ("DEF-toe.R","toe.R",True,True),
         ("DEF-toe_thumb.01.L","toe_thumb.01.L",True,False),
         ("DEF-toe_thumb.02.L","toe_thumb.02.L",True,False),
         ("DEF-toe_index.01.L","toe_index.01.L",True,False),
@@ -600,8 +920,8 @@ def RIG2(context):
         ("DEF-toe_ring.02.R","toe_ring.02.R",True,False),
         ("DEF-toe_pinky.01.R","toe_pinky.01.R",True,False),
         ("DEF-toe_pinky.02.R","toe_pinky.02.R",True,False),
-        ("DEF-foot.L","ToeTipIK_L",False,True),
-        ("DEF-foot.R","ToeTipIK_R",False,True),
+        ("DEF-toe.L","ToeTipIK_L",False,True),
+        ("DEF-toe.R","ToeTipIK_R",False,True),
 
         ("spine_fk.003","spine.003",True,True),
         ("spine_fk.002","spine.002",True,True),
@@ -658,15 +978,19 @@ def RIG2(context):
         constraints_list.append(("ORG-eye.L","eye.L",True,False))
         constraints_list.append(("ORG-eye.R","eye.R",True,False))
 
+    # 添加约束
+    # 注意：add_constraint3内部会处理模式切换和活动对象设置
     add_constraint3(constraints_list,preset_dict)
 
     bpy.ops.object.mode_set(mode = 'POSE')
     
     #修正rigifyIK控制器范围限制
-    rig.pose.bones["MCH-shin_ik.L"].use_ik_limit_x = True
-    rig.pose.bones["MCH-shin_ik.R"].use_ik_limit_x = True
-    rig.pose.bones["MCH-shin_ik.L"].ik_min_x = -0.0174533
-    rig.pose.bones["MCH-shin_ik.R"].ik_min_x = -0.0174533
+    if "MCH-shin_ik.L" in rig.pose.bones:
+        rig.pose.bones["MCH-shin_ik.L"].use_ik_limit_x = True
+        rig.pose.bones["MCH-shin_ik.L"].ik_min_x = -0.0174533
+    if "MCH-shin_ik.R" in rig.pose.bones:
+        rig.pose.bones["MCH-shin_ik.R"].use_ik_limit_x = True
+        rig.pose.bones["MCH-shin_ik.R"].ik_min_x = -0.0174533
 
     '''rig.pose.bones["MCH-forearm_ik.L"].use_ik_limit_z = True
     rig.pose.bones["MCH-forearm_ik.R"].use_ik_limit_z = True
@@ -677,17 +1001,25 @@ def RIG2(context):
     #pole target
     #rig.pose.bones["MCH-forearm_ik.L"].constraints["IK.001"].pole_angle = 3.14159
     if mmr_property.pole_target:
-        rig.pose.bones["thigh_parent.L"]["pole_vector"] = 1
-        rig.pose.bones["thigh_parent.R"]["pole_vector"] = 1
-        rig.pose.bones["upper_arm_parent.L"]["pole_vector"] = 1
-        rig.pose.bones["upper_arm_parent.R"]["pole_vector"] = 1
+        if "thigh_parent.L" in rig.pose.bones and "pole_vector" in rig.pose.bones["thigh_parent.L"]:
+            rig.pose.bones["thigh_parent.L"]["pole_vector"] = 1
+        if "thigh_parent.R" in rig.pose.bones and "pole_vector" in rig.pose.bones["thigh_parent.R"]:
+            rig.pose.bones["thigh_parent.R"]["pole_vector"] = 1
+        if "upper_arm_parent.L" in rig.pose.bones and "pole_vector" in rig.pose.bones["upper_arm_parent.L"]:
+            rig.pose.bones["upper_arm_parent.L"]["pole_vector"] = 1
+        if "upper_arm_parent.R" in rig.pose.bones and "pole_vector" in rig.pose.bones["upper_arm_parent.R"]:
+            rig.pose.bones["upper_arm_parent.R"]["pole_vector"] = 1
 
     #将IK拉伸设为0
     #set IK stretch to 0
-    rig.pose.bones["upper_arm_parent.L"]["IK_Stretch"] = 0
-    rig.pose.bones["upper_arm_parent.R"]["IK_Stretch"] = 0
-    rig.pose.bones["thigh_parent.L"]["IK_Stretch"] = 0
-    rig.pose.bones["thigh_parent.R"]["IK_Stretch"] = 0
+    if "upper_arm_parent.L" in rig.pose.bones and "IK_Stretch" in rig.pose.bones["upper_arm_parent.L"]:
+        rig.pose.bones["upper_arm_parent.L"]["IK_Stretch"] = 0
+    if "upper_arm_parent.R" in rig.pose.bones and "IK_Stretch" in rig.pose.bones["upper_arm_parent.R"]:
+        rig.pose.bones["upper_arm_parent.R"]["IK_Stretch"] = 0
+    if "thigh_parent.L" in rig.pose.bones and "IK_Stretch" in rig.pose.bones["thigh_parent.L"]:
+        rig.pose.bones["thigh_parent.L"]["IK_Stretch"] = 0
+    if "thigh_parent.R" in rig.pose.bones and "IK_Stretch" in rig.pose.bones["thigh_parent.R"]:
+        rig.pose.bones["thigh_parent.R"]["IK_Stretch"] = 0
 
     #捩骨约束
     #Twist constrains
@@ -835,7 +1167,8 @@ def RIG2(context):
     bpy.context.view_layer.objects.active=rig
     rig.select_set(True)
     bpy.context.scene.tool_settings.transform_pivot_point = 'INDIVIDUAL_ORIGINS'
-    bpy.context.area.type = area
+    if area and bpy.context.area:
+        bpy.context.area.type = area
     logging.info("完成"+'匹配骨骼数:'+str(match_bone_nunber))
     alert_error("提示","完成"+'匹配骨骼数:'+str(match_bone_nunber))
     return(True)
