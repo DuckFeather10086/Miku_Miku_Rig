@@ -45,9 +45,21 @@ def get_action_fcurves(action):
     return action.fcurves
 
 def alert_error(title,message):
-    def draw(self,context):
-        self.layout.label(text=str(message))
-    bpy.context.window_manager.popup_menu(draw,title=title,icon='ERROR')
+    # 在无头模式下使用print，避免popup_menu导致崩溃
+    # 检查是否在无头模式下运行（没有窗口或区域）
+    is_headless = bpy.app.background or not bpy.context.area
+    if is_headless:
+        print(f"[{title}] {message}")
+    else:
+        try:
+            def draw(self,context):
+                self.layout.label(text=str(message))
+            if bpy.context.window_manager:
+                bpy.context.window_manager.popup_menu(draw,title=title,icon='ERROR')
+            else:
+                print(f"[{title}] {message}")
+        except:
+            print(f"[{title}] {message}")
 
 def retarget_mixmao(OT,context):
 

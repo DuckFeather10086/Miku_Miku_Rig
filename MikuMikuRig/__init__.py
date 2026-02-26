@@ -203,9 +203,21 @@ class MikuMikuRig_5(Mmr_Panel_Base):
 
 
 def alert_error(title, message):
-    def draw(self, context):
-        self.layout.label(text=str(message))
-    bpy.context.window_manager.popup_menu(draw, title=title, icon='ERROR')
+    # 在无头模式下使用print，避免popup_menu导致崩溃
+    # 检查是否在无头模式下运行（没有窗口或区域）
+    is_headless = bpy.app.background or not bpy.context.area
+    if is_headless:
+        print(f"[{title}] {message}")
+    else:
+        try:
+            def draw(self, context):
+                self.layout.label(text=str(message))
+            if bpy.context.window_manager:
+                bpy.context.window_manager.popup_menu(draw, title=title, icon='ERROR')
+            else:
+                print(f"[{title}] {message}")
+        except:
+            print(f"[{title}] {message}")
 
 
 class_list = [MikuMikuRig_2, MikuMikuRig_4, MikuMikuRig_5]
