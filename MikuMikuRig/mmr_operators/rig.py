@@ -186,7 +186,7 @@ def RIG2(context):
 
     #导入metarig骨骼
     #import metarig armature
-    rigify_arm_name="MMR_Rig_relative3"
+    rigify_arm_name="MMR_Rig_relative4"
     
     with bpy.data.libraries.load(rigify_blend_file) as (data_from, data_to):
         data_to.objects = [rigify_arm_name]
@@ -233,8 +233,10 @@ def RIG2(context):
             bone=rigify_bone[name]
             bone.rigify_parameters.primary_rotation_axis='automatic'
 
-    #自动缩放
-    scale=(mmd_arm.pose.bones[preset_dict['spine.006']].head[2]*mmd_arm.scale[2])/(rigify_arm.pose.bones['spine.006'].head[2]*rigify_arm.scale[2])
+    #自动缩放（头骨为 spine.007 时用 spine.007，否则 spine.006）
+    head_key = 'spine.007' if 'spine.007' in preset_dict else 'spine.006'
+    rigify_head = head_key if head_key in rigify_arm.data.edit_bones else 'spine.006'
+    scale=(mmd_arm.pose.bones[preset_dict[head_key]].head[2]*mmd_arm.scale[2])/(rigify_arm.pose.bones[rigify_head].head[2]*rigify_arm.scale[2])
     rigify_arm.scale*=scale
 
     bpy.ops.object.select_all(action='DESELECT')
@@ -287,17 +289,31 @@ def RIG2(context):
     if rigify_arm.data.edit_bones["spine.001"].tail==rigify_arm.data.edit_bones["spine.003"].head:
         rigify_arm.data.edit_bones["spine.001"].tail[2]-=0.01
 
-    rigify_arm.data.edit_bones["spine.006"].tail=rigify_arm.data.edit_bones["spine.006"].head
-    rigify_arm.data.edit_bones["spine.006"].tail[2]+=rigify_arm.data.edit_bones["spine.004"].length*3
+    # spine.005 可选；头为 spine.007 或 spine.006
+    if "spine.005" in rigify_arm.data.edit_bones:
+        if rigify_arm.data.edit_bones["spine.004"].tail==rigify_arm.data.edit_bones["spine.006"].head:
+            rigify_arm.data.edit_bones["spine.004"].tail[2]-=0.01
+        if rigify_arm.data.edit_bones["spine.005"].tail==rigify_arm.data.edit_bones["spine.006"].head:
+            rigify_arm.data.edit_bones["spine.005"].tail[2]-=0.01
+    elif rigify_arm.data.edit_bones["spine.004"].tail==rigify_arm.data.edit_bones["spine.006"].head:
+        rigify_arm.data.edit_bones["spine.004"].tail[2]-=0.01
+
+    if "spine.007" in rigify_arm.data.edit_bones:
+        rigify_arm.data.edit_bones["spine.006"].tail=rigify_arm.data.edit_bones["spine.007"].head
+        eb7 = rigify_arm.data.edit_bones["spine.007"]
+        eb7.tail = eb7.head + mathutils.Vector((0, 0, rigify_arm.data.edit_bones["spine.004"].length * 3))
+    else:
+        rigify_arm.data.edit_bones["spine.006"].tail=rigify_arm.data.edit_bones["spine.006"].head
+        rigify_arm.data.edit_bones["spine.006"].tail[2]+=rigify_arm.data.edit_bones["spine.004"].length*3
     if rigify_arm.data.edit_bones["spine.004"].tail==rigify_arm.data.edit_bones["spine.006"].head:
         rigify_arm.data.edit_bones["spine.004"].tail[2]-=0.01
 
     rigify_arm.data.edit_bones["hand.L"].tail=(rigify_arm.data.edit_bones["f_middle.01.L"].head+rigify_arm.data.edit_bones["f_ring.01.L"].head)/2
     rigify_arm.data.edit_bones["hand.R"].tail=(rigify_arm.data.edit_bones["f_middle.01.R"].head+rigify_arm.data.edit_bones["f_ring.01.R"].head)/2
 
-    if 'ToeTipIK_L' in preset_dict and "toe.L" not in preset_dict:
+    if 'ToeTipIK_L' in preset_dict and "toe.L" not in preset_dict and "toe_thumb.01.L" not in preset_dict:
         rigify_arm.data.edit_bones["toe.L"].head=mmd_arm.pose.bones[preset_dict['ToeTipIK_L']].head
-    if 'ToeTipIK_R' in preset_dict and "toe.R" not in preset_dict:
+    if 'ToeTipIK_R' in preset_dict and "toe.R" not in preset_dict and "toe_thumb.01.R" not in preset_dict:
         rigify_arm.data.edit_bones["toe.R"].head=mmd_arm.pose.bones[preset_dict['ToeTipIK_R']].head
 
     rigify_arm.data.edit_bones["toe.L"].tail=rigify_arm.data.edit_bones["toe.L"].head
@@ -318,8 +334,10 @@ def RIG2(context):
     rigify_arm.data.edit_bones["heel.02.R"].tail[0]-=rigify_arm.data.edit_bones["foot.R"].length/10
     rigify_arm.data.edit_bones["heel.02.R"].head[0]+=rigify_arm.data.edit_bones["foot.R"].length/10
 
-    extend_bone=['thumb.03.L','f_index.03.L','f_middle.03.L','f_ring.03.L','f_pinky.03.L','thumb.03.R','f_index.03.R','f_middle.03.R','f_ring.03.R','f_pinky.03.R',]
+    extend_bone=['thumb.03.L','f_index.03.L','f_middle.03.L','f_ring.03.L','f_pinky.03.L','thumb.03.R','f_index.03.R','f_middle.03.R','f_ring.03.R','f_pinky.03.R','toe_thumb.02.L','toe_index.02.L','toe_middle.02.L','toe_ring.02.L','toe_pinky.02.L','toe_thumb.02.R','toe_index.02.R','toe_middle.02.R','toe_ring.02.R','toe_pinky.02.R',]
     for name in extend_bone:
+        if name not in rigify_arm.data.edit_bones:
+            continue
         bone=rigify_arm.data.edit_bones[name]
         parent_bone=bone.parent
         bone.tail=parent_bone.tail*2-parent_bone.head
@@ -562,6 +580,26 @@ def RIG2(context):
         ("DEF-foot.R","LegIK_R",True,True),
         ("DEF-toe.L","toe.L",True,False),
         ("DEF-toe.R","toe.R",True,False),
+        ("DEF-toe_thumb.01.L","toe_thumb.01.L",True,False),
+        ("DEF-toe_thumb.02.L","toe_thumb.02.L",True,False),
+        ("DEF-toe_index.01.L","toe_index.01.L",True,False),
+        ("DEF-toe_index.02.L","toe_index.02.L",True,False),
+        ("DEF-toe_middle.01.L","toe_middle.01.L",True,False),
+        ("DEF-toe_middle.02.L","toe_middle.02.L",True,False),
+        ("DEF-toe_ring.01.L","toe_ring.01.L",True,False),
+        ("DEF-toe_ring.02.L","toe_ring.02.L",True,False),
+        ("DEF-toe_pinky.01.L","toe_pinky.01.L",True,False),
+        ("DEF-toe_pinky.02.L","toe_pinky.02.L",True,False),
+        ("DEF-toe_thumb.01.R","toe_thumb.01.R",True,False),
+        ("DEF-toe_thumb.02.R","toe_thumb.02.R",True,False),
+        ("DEF-toe_index.01.R","toe_index.01.R",True,False),
+        ("DEF-toe_index.02.R","toe_index.02.R",True,False),
+        ("DEF-toe_middle.01.R","toe_middle.01.R",True,False),
+        ("DEF-toe_middle.02.R","toe_middle.02.R",True,False),
+        ("DEF-toe_ring.01.R","toe_ring.01.R",True,False),
+        ("DEF-toe_ring.02.R","toe_ring.02.R",True,False),
+        ("DEF-toe_pinky.01.R","toe_pinky.01.R",True,False),
+        ("DEF-toe_pinky.02.R","toe_pinky.02.R",True,False),
         ("DEF-foot.L","ToeTipIK_L",False,True),
         ("DEF-foot.R","ToeTipIK_R",False,True),
 
@@ -572,7 +610,9 @@ def RIG2(context):
         ("spine_fk","spine",True,True),
         ("torso","Center",True,True),
         ("DEF-spine.004","spine.004",True,True),
+        ("DEF-spine.005","spine.005",True,True),
         ("DEF-spine.006","spine.006",True,True),
+        ("DEF-spine.007","spine.007",True,True),
         ("root","ParentNode",True,True),
 
         ("DEF-thumb.01.L","thumb.01.L",True,True),
@@ -747,7 +787,10 @@ def RIG2(context):
     #锁定缩放的骨骼列表
     #lock the scale of these bone
     lock_scale_bone_list=[
-        "root","torso","foot_ik.L","foot_ik.R","toe.L","toe.R","hand_ik.L","hand_ik.R","upper_arm_ik.L","upper_arm_ik.R","thigh_ik.L","thigh_ik.R",
+        "root","torso","foot_ik.L","foot_ik.R","toe.L","toe.R",
+        "toe_thumb.01.L","toe_thumb.02.L","toe_index.01.L","toe_index.02.L","toe_middle.01.L","toe_middle.02.L","toe_ring.01.L","toe_ring.02.L","toe_pinky.01.L","toe_pinky.02.L",
+        "toe_thumb.01.R","toe_thumb.02.R","toe_index.01.R","toe_index.02.R","toe_middle.01.R","toe_middle.02.R","toe_ring.01.R","toe_ring.02.R","toe_pinky.01.R","toe_pinky.02.R",
+        "hand_ik.L","hand_ik.R","upper_arm_ik.L","upper_arm_ik.R","thigh_ik.L","thigh_ik.R",
         "hips","chest","neck","head","shoulder.L","shoulder.R"
         ]
     for name in lock_location_bone_list:
