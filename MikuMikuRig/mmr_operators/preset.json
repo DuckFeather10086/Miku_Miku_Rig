@@ -991,6 +991,86 @@
                 "f_pinky.03.R",
                 false
             ],
+            "l_bigtoe1": [
+                "toe_thumb.01.L",
+                false
+            ],
+            "l_bigtoe2": [
+                "toe_thumb.02.L",
+                false
+            ],
+            "l_indextoe1": [
+                "toe_index.01.L",
+                false
+            ],
+            "l_indextoe2": [
+                "toe_index.02.L",
+                false
+            ],
+            "l_midtoe1": [
+                "toe_middle.01.L",
+                false
+            ],
+            "l_midtoe2": [
+                "toe_middle.02.L",
+                false
+            ],
+            "l_ringtoe1": [
+                "toe_ring.01.L",
+                false
+            ],
+            "l_ringtoe2": [
+                "toe_ring.02.L",
+                false
+            ],
+            "l_pinkytoe1": [
+                "toe_pinky.01.L",
+                false
+            ],
+            "l_pinkytoe2": [
+                "toe_pinky.02.L",
+                false
+            ],
+            "r_bigtoe1": [
+                "toe_thumb.01.R",
+                false
+            ],
+            "r_bigtoe2": [
+                "toe_thumb.02.R",
+                false
+            ],
+            "r_indextoe1": [
+                "toe_index.01.R",
+                false
+            ],
+            "r_indextoe2": [
+                "toe_index.02.R",
+                false
+            ],
+            "r_midtoe1": [
+                "toe_middle.01.R",
+                false
+            ],
+            "r_midtoe2": [
+                "toe_middle.02.R",
+                false
+            ],
+            "r_ringtoe1": [
+                "toe_ring.01.R",
+                false
+            ],
+            "r_ringtoe2": [
+                "toe_ring.02.R",
+                false
+            ],
+            "r_pinkytoe1": [
+                "toe_pinky.01.R",
+                false
+            ],
+            "r_pinkytoe2": [
+                "toe_pinky.02.R",
+                false
+            ],
             "rPectoral": [
                 "breast.L",
                 false
@@ -1291,6 +1371,86 @@
             ],
             "r_pinky3": [
                 "f_pinky.03.R",
+                false
+            ],
+            "l_bigtoe1": [
+                "toe_thumb.01.L",
+                false
+            ],
+            "l_bigtoe2": [
+                "toe_thumb.02.L",
+                false
+            ],
+            "l_indextoe1": [
+                "toe_index.01.L",
+                false
+            ],
+            "l_indextoe2": [
+                "toe_index.02.L",
+                false
+            ],
+            "l_midtoe1": [
+                "toe_middle.01.L",
+                false
+            ],
+            "l_midtoe2": [
+                "toe_middle.02.L",
+                false
+            ],
+            "l_ringtoe1": [
+                "toe_ring.01.L",
+                false
+            ],
+            "l_ringtoe2": [
+                "toe_ring.02.L",
+                false
+            ],
+            "l_pinkytoe1": [
+                "toe_pinky.01.L",
+                false
+            ],
+            "l_pinkytoe2": [
+                "toe_pinky.02.L",
+                false
+            ],
+            "r_bigtoe1": [
+                "toe_thumb.01.R",
+                false
+            ],
+            "r_bigtoe2": [
+                "toe_thumb.02.R",
+                false
+            ],
+            "r_indextoe1": [
+                "toe_index.01.R",
+                false
+            ],
+            "r_indextoe2": [
+                "toe_index.02.R",
+                false
+            ],
+            "r_midtoe1": [
+                "toe_middle.01.R",
+                false
+            ],
+            "r_midtoe2": [
+                "toe_middle.02.R",
+                false
+            ],
+            "r_ringtoe1": [
+                "toe_ring.01.R",
+                false
+            ],
+            "r_ringtoe2": [
+                "toe_ring.02.R",
+                false
+            ],
+            "r_pinkytoe1": [
+                "toe_pinky.01.R",
+                false
+            ],
+            "r_pinkytoe2": [
+                "toe_pinky.02.R",
                 false
             ],
             "l_eye": [
