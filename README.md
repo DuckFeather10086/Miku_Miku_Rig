@@ -2,6 +2,9 @@
 MikuMikuRig是一款集生成控制器，自动导入动画，自动布料为一体的blender插件。
 注意：Blender3.0需要安装Rigify修复补丁
 
+
+20260302：支持 Blender 5.0；支持脚趾细节映射。
+
 MikumiKurig is a Blender plugin that can generates rig, automatically imports animations as nla track, and automatically generates cloth.
 
 ## 功能 Functions
