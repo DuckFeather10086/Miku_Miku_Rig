@@ -5,7 +5,7 @@ MikuMikuRig是一款集生成控制器，自动导入动画，自动布料为一
 
 20260302：支持 Blender 5.0；支持脚趾细节映射。
 
-MikumiKurig is a Blender plugin that can generates rig, automatically imports animations as nla track, and automatically generates cloth.
+MikuMikuRig is a Blender plugin that can generates rig, automatically imports animations as nla track, and automatically generates cloth.
 
 ## 功能 Functions
 一键为任何骨骼生成Rigify控制器
@@ -30,3 +30,7 @@ Decorate MMD armature with one click
 
 视频演示：
 https://www.bilibili.com/video/BV1vZ4y1P71a/
+
+## 文档 / Docs
+
+- **[AI：从骨架树生成 Rigify 骨骼映射](docs/AI_RIGIFY_MAPPING_TOOL.md)** — 供 AI 使用的工具说明：根据输出的骨架树结构，自动生成匹配 Rigify 控制器的 metarig 骨骼映射（preset.json 格式）。

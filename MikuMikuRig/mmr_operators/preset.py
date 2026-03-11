@@ -82,6 +82,46 @@ bone_translate_dict_C={
 built_in_rig_dict_list=['None','MMD_JP','MMD_EN','VRoid']
 built_in_retarget_dict_list=['None','mixamo','Rigify','FBX动捕','BVH动捕']
 
+
+def get_ai_mapping_prompt_text():
+    """Build English prompt for LLM to generate rig preset from skeleton structure and bone name semantics."""
+    return r"""You are helping to configure a bone mapping for Miku Miku Rig (Blender add-on). Given a skeleton's structure and bone names, output a JSON mapping that assigns each source bone to a supported controller ID.
+
+## Supported controllers (use only these IDs)
+
+**Root & spine (order: root → spine → spine.001 → … → spine.007):**
+- Root, Center
+- spine, spine.001, spine.002, spine.003, spine.004, spine.005, spine.006, spine.007
+
+**Rule — spine.007 is HEAD:** The rig expects spine.007 to be the head bone. You MUST map the skeleton's head bone to spine.007. If the source skeleton has more spine/neck/head bones than we have segments (spine through spine.007), shorten the match: map the head to spine.007 and assign the remaining spine IDs backwards toward the pelvis; leave any extra upper spines unmapped or merge them. Do not map spine.007 to a non-head bone.
+
+**Eyes (optional):** eye.L, eye.R
+
+**Arms (L/R):** shoulder.L/R, upper_arm.L/R, ArmTwist_L/R (optional), forearm.L/R, HandTwist_L/R (optional), hand.L/R
+**Fingers (3 segments each, L/R):** thumb.01–03, f_index.01–03, f_middle.01–03, f_ring.01–03, f_pinky.01–03
+
+**Legs (L/R):** thigh.L/R, shin.L/R, foot.L/R, toe.L/R (optional), ToeTipIK_L/R (optional), LegIK_L/R (for retarget)
+
+**Toes (optional, L/R):** toe_thumb.01–02, toe_index.01–02, toe_middle.01–02, toe_ring.01–02, toe_pinky.01–02
+
+## Output format (required)
+
+You MUST output a single JSON object only: the preset mapping layer. Do NOT wrap it in "rig" or a preset name. The user will paste this into the add-on and type the preset name there.
+
+- Keys: exact source bone names (as in the skeleton).
+- Values: exactly [controller_id, invert] — controller_id is a string from the list above, invert is boolean (true/false).
+
+Valid example (copy this structure only):
+{"Head": ["spine.007", false], "Neck": ["spine.004", false], "LeftArm": ["upper_arm.L", false], "pelvis": ["spine", true]}
+
+Invalid: do not output {"rig": {"MyPreset": { ... }}}. Output only the inner { "bone": ["id", false], ... } object.
+
+## Task
+
+Using the skeleton structure and bone name semantics provided by the user, produce the full mapping JSON. Only include bones that have a clear semantic match. Use L/R suffix for left/right. Remember: head bone → spine.007; if there are more spine segments than spine..001–.007, shorten so that head = spine.007.
+"""
+
+
 bpy.types.PoseBone.mmr_bone_invert=bpy.props.BoolProperty(
     default=False
 )
@@ -138,6 +178,23 @@ def read_json(preset_type):
     else:
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(preset_dict_dict, f, indent=4, ensure_ascii=False)
+
+
+def reload_presets_from_disk():
+    """Reload preset.json from disk into memory. Returns (success: bool, message: str)."""
+    global preset_dict_dict
+    if not os.path.exists(json_path):
+        return False, "preset.json not found"
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        return False, str(e)
+    if not isinstance(data, dict) or 'rig' not in data or 'retarget' not in data:
+        return False, "preset.json must contain 'rig' and 'retarget' top-level keys"
+    preset_dict_dict.clear()
+    preset_dict_dict.update(data)
+    return True, "Presets reloaded from preset.json"
 
 def write_json(preset_type):
     with open(json_path, "w", encoding='utf-8') as f:
@@ -287,6 +344,100 @@ class OT_Overwrite_Preset(bpy.types.Operator):
         overwrite_preset(name,preset,self.preset_type)
         return{"FINISHED"}
 
+
+class OT_Copy_AI_Prompt(bpy.types.Operator):
+    bl_idname = "mmr.copy_ai_prompt"
+    bl_label = "Copy AI Prompt"
+    bl_description = "Generate English prompt for AI to create bone mapping from skeleton structure; copy to clipboard"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        text = get_ai_mapping_prompt_text()
+        context.window_manager.clipboard = text
+        self.report({'INFO'}, "AI prompt copied to clipboard")
+        return {'FINISHED'}
+
+
+class OT_Reload_Presets(bpy.types.Operator):
+    bl_idname = "mmr.reload_presets"
+    bl_label = "Reload preset.json"
+    bl_description = "Reload preset.json from disk so edits take effect without restarting Blender"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        ok, msg = reload_presets_from_disk()
+        if ok:
+            for area in context.screen.areas:
+                area.tag_redraw()
+            self.report({'INFO'}, msg)
+            return {'FINISHED'}
+        self.report({'ERROR'}, msg)
+        return {'CANCELLED'}
+
+
+def _validate_preset_mapping(data):
+    """Validate that data is a dict of bone_name -> [controller_id, invert]. Returns (True, None) or (False, error_msg)."""
+    if not isinstance(data, dict):
+        return False, "Must be a JSON object"
+    for k, v in data.items():
+        if not isinstance(k, str):
+            return False, f"Key must be string, got: {type(k).__name__}"
+        if not isinstance(v, (list, tuple)) or len(v) != 2:
+            return False, f"Value for '{k}' must be [controller_id, invert], e.g. [\"spine.007\", false]"
+        cid, inv = v[0], v[1]
+        if not isinstance(cid, str):
+            return False, f"Controller ID for '{k}' must be string"
+        if not isinstance(inv, (bool, int)):
+            return False, f"Invert for '{k}' must be boolean"
+    return True, None
+
+
+class OT_Add_Preset_From_Clipboard(bpy.types.Operator):
+    bl_idname = "mmr.add_preset_from_clipboard"
+    bl_label = "Add preset from clipboard"
+    bl_description = "Paste AI-generated mapping from clipboard, enter preset name; adds as new rig preset and saves"
+    bl_options = {'REGISTER'}
+
+    preset_name: bpy.props.StringProperty(name="Preset Name", default="", description="Name for the new preset (e.g. Genesis9)")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "preset_name", text="Preset name")
+        layout.label(text="Clipboard must contain only the mapping JSON (no \"rig\" or preset name wrapper).")
+
+    def execute(self, context):
+        name = self.preset_name.strip()
+        if not name:
+            self.report({'ERROR'}, "Preset name is required")
+            return {'CANCELLED'}
+        text = context.window_manager.clipboard
+        if not (text and text.strip()):
+            self.report({'ERROR'}, "Clipboard is empty; copy the AI-generated JSON first")
+            return {'CANCELLED'}
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            self.report({'ERROR'}, f"Invalid JSON: {e}")
+            return {'CANCELLED'}
+        ok, err = _validate_preset_mapping(data)
+        if not ok:
+            self.report({'ERROR'}, err)
+            return {'CANCELLED'}
+        # Normalize values to [str, bool]
+        normalized = {}
+        for k, v in data.items():
+            normalized[k] = [str(v[0]), bool(v[1])]
+        preset_dict_dict['rig'][name] = normalized
+        write_json('rig')
+        for area in context.screen.areas:
+            area.tag_redraw()
+        self.report({'INFO'}, f"Preset \"{name}\" added and saved")
+        return {'FINISHED'}
+
+
 class OT_Rig_Preset(bpy.types.Operator):
     bl_idname = "mmr.rig_preset" # python 提示
     bl_label = "Rig Preset"
@@ -308,6 +459,55 @@ class OT_Rig_Preset(bpy.types.Operator):
             set_bone_type(pose,preset)
         rig.RIG2(context)
         return{"FINISHED"}
+
+
+class OT_Fix_All_Controllers_By_Preset(bpy.types.Operator):
+    bl_idname = "mmr.fix_all_controllers_by_preset"
+    bl_label = "Fix all controllers by preset"
+    bl_description = "Apply current preset to source armature and regenerate rig controllers"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def _find_source_armature(self, context, preset):
+        obj = context.object
+        if not obj or obj.type != 'ARMATURE' or obj.pose is None:
+            return None
+
+        preset_bones = set(preset.keys())
+        if any(name in obj.pose.bones for name in preset_bones):
+            return obj
+
+        if obj.name.endswith("_Rig"):
+            source_name = obj.name[:-4]
+            source_obj = bpy.data.objects.get(source_name)
+            if source_obj and source_obj.type == 'ARMATURE' and source_obj.pose is not None:
+                if any(name in source_obj.pose.bones for name in preset_bones):
+                    return source_obj
+        return None
+
+    def execute(self, context):
+        scene = context.scene
+        mmr_property = scene.mmr_property
+        preset_name = mmr_property.rig_preset_name
+        preset_dict = preset_dict_dict.get('rig', {})
+        if preset_name not in preset_dict:
+            self.report({'ERROR'}, f'Preset "{preset_name}" not found')
+            return {'CANCELLED'}
+
+        preset = preset_dict[preset_name]
+        source_arm = self._find_source_armature(context, preset)
+        if source_arm is None:
+            self.report({'ERROR'}, "Cannot find source armature. Select source armature or *_Rig generated from it.")
+            return {'CANCELLED'}
+
+        # Make source armature active so RIG2 reads and rebuilds from current preset mapping.
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        source_arm.select_set(True)
+        context.view_layer.objects.active = source_arm
+        set_bone_type(source_arm.pose, preset)
+        rig.RIG2(context)
+        self.report({'INFO'}, f'Controllers regenerated by preset "{preset_name}"')
+        return {'FINISHED'}
 
 def set_keymap():
     wm = bpy.context.window_manager
@@ -518,10 +718,14 @@ class MMR_Arm_Panel(Mmr_Panel_Base):
                 row = layout.row()
                 row.operator("mmr.add_preset")
                 row.operator("mmr.read_preset")
+            layout.operator("mmr.reload_presets", text="Reload preset.json")
             layout.operator("mmr.rig_preset",text='Generate Rig with Preset')
             ot=layout.operator("mmr.rig_preset",text='Generate Rig Without Preset')
             ot.read=False
             layout.operator("mmr.qa_start",text='Start Quick Assign')
+            layout.operator("mmr.copy_ai_prompt", text="Generate AI Prompt")
+            layout.operator("mmr.add_preset_from_clipboard", text="Add preset from clipboard")
+            layout.operator("mmr.fix_all_controllers_by_preset", text="Fix all controllers by preset")
             layout.prop(mmr_property, "extra_options1", toggle=True,text='Extra Options')
             if mmr_property.extra_options1:
                 layout.prop(mmr_property,'bent_IK_bone',text="Bent IK bone")
@@ -529,6 +733,7 @@ class MMR_Arm_Panel(Mmr_Panel_Base):
                 layout.prop(mmr_property,'auto_shoulder',text="Shoulder IK")
                 #layout.prop(mmr_property,'solid_rig',text="Replace the controller")
                 layout.prop(mmr_property,'pole_target',text="Use pole target")
+                layout.prop(mmr_property,'extra_source_controllers',text="Extra source controllers")
 
 class MMR_Bone_Panel(Mmr_Panel_Base):
     bl_idname="MMR_PT_panel_11"
@@ -577,6 +782,7 @@ class MMR_Retarget_Panel(Mmr_Panel_Base):
             row = layout.row()
             row.operator("mmr.add_preset").preset_type='retarget'
             row.operator("mmr.read_preset").preset_type='retarget'
+        layout.operator("mmr.reload_presets", text="Reload preset.json")
         layout.label(text="Select rigify controller then press the button")
         #row=layout.row()
         #row.label(text='Arm:',translate =False)
@@ -596,6 +802,6 @@ class MMR_Retarget_Panel(Mmr_Panel_Base):
             layout.prop(mmr_property,'lock_location',text="Lock animation location")
             layout.prop(mmr_property,'import_as_NLA_strip',text="Import as NLA strip")
 Class_list=[
-    MMR_Bone_Panel,MMR_Arm_Panel,OT_Add_Preset,OT_Delete_Preset,OT_Read_Preset,OT_Overwrite_Preset,OT_Rig_Preset,
+    MMR_Bone_Panel,MMR_Arm_Panel,OT_Add_Preset,OT_Delete_Preset,OT_Read_Preset,OT_Overwrite_Preset,OT_Copy_AI_Prompt,OT_Reload_Presets,OT_Add_Preset_From_Clipboard,OT_Rig_Preset,OT_Fix_All_Controllers_By_Preset,
     OT_QA_Start,OT_QA_End,OT_QA_Assign,OT_QA_Assign_Invert,OT_QA_Skip,MMR_Retarget_Panel,
 ]

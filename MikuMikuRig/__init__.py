@@ -33,6 +33,7 @@ class MMR_property(bpy.types.PropertyGroup):
     auto_shoulder: BoolProperty(default=False, description="肩膀联动")
     solid_rig: BoolProperty(default=False, description="实心控制器")
     pole_target: BoolProperty(default=False, description="极向目标")
+    extra_source_controllers: BoolProperty(default=False, description="为额外源骨骼生成简易控制器")
     min_ik_loop: IntProperty(default=10, description="最小IK迭代次数", min=1)
     lock_location: BoolProperty(default=False, description="锁定动画位置")
     fade_in_out: IntProperty(default=0, description="淡入淡出长度", min=0)
@@ -183,7 +184,7 @@ class MikuMikuRig_4(Mmr_Panel_Base):
                     text="Auto select rigid body", toggle=True)
         layout.prop(mmr_property, 'extend_ribbon',
                     text="Extend ribbon area", toggle=True)
-        layout.label(text="This featur is developed in cooperation with")
+        layout.label(text="This feature is developed in cooperation with")
         layout.label(text="UuuNyaa")
 
 

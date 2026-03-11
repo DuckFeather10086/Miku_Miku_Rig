@@ -1044,7 +1044,7 @@ def export_vmd(OT,context):
     '左小指１':['f_pinky.01_master.L','f_pinky.01.L'],'左小指２':['f_pinky.01_master.L','f_pinky.02.L'],'左小指３':['f_pinky.01_master.L','f_pinky.03.L'],
     '右親指０':['thumb.01_master.R','thumb.01.R'],'右親指１':['thumb.01_master.R','thumb.02.R'],'右親指２':['thumb.01_master.R','thumb.03.R'],
     '右人指１':['f_index.01_master.R','f_index.01.R'],'右人指２':['f_index.01_master.R','f_index.02.R'],'右人指３':['f_index.01_master.R','f_index.03.R'],
-    '右中指１':['f_middle.01_master.L','f_middle.01.R'],'右中指２':['f_middle.01_master.L','f_middle.02.R'],'右中指３':['f_middle.01_master.L','f_middle.03.R'],
+    '右中指１':['f_middle.01_master.R','f_middle.01.R'],'右中指２':['f_middle.01_master.R','f_middle.02.R'],'右中指３':['f_middle.01_master.R','f_middle.03.R'],
     '右薬指１':['f_ring.01_master.R','f_ring.01.R'],'右薬指２':['f_ring.01_master.R','f_ring.02.R'],'右薬指３':['f_ring.01_master.R','f_ring.03.R'],
     '右小指１':['f_pinky.01_master.R','f_pinky.01.R'],'右小指２':['f_pinky.01_master.R','f_pinky.02.R'],'右小指３':['f_pinky.01_master.R','f_pinky.03.R'],
     }

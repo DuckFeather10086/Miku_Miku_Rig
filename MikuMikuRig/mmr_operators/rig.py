@@ -57,11 +57,11 @@ def load_pose():
     bpy.ops.object.mode_set(mode = 'OBJECT')
 
 def add_constraint3(constraint_List,preset_dict):
-    global match_bone_nunber
+    global match_bone_number
     global rig
     global mmd_arm
     global mmd_bones_list
-    match_bone_nunber=0
+    match_bone_number=0
     rig_bones_list=rig.data.bones.keys()
 
     index_list=[]
@@ -85,7 +85,7 @@ def add_constraint3(constraint_List,preset_dict):
         From=preset_dict[From]
 
         if From in mmd_bones_list and To in rig_bones_list:
-            match_bone_nunber+=1
+            match_bone_number+=1
             index_list.append(i)
             mmd_arm.data.bones[From].hide=False
         else:
@@ -96,7 +96,7 @@ def add_constraint3(constraint_List,preset_dict):
                 missing_in_rig += 1
     
     # 输出调试信息
-    print(f"约束匹配统计: 总约束数={len(constraint_List)}, 匹配={match_bone_nunber}, 预设中缺失={missing_in_preset}, MMD骨骼缺失={missing_in_mmd}, Rig骨骼缺失={missing_in_rig}")
+    print(f"约束匹配统计: 总约束数={len(constraint_List)}, 匹配={match_bone_number}, 预设中缺失={missing_in_preset}, MMD骨骼缺失={missing_in_mmd}, Rig骨骼缺失={missing_in_rig}")
 
     # 确保rig是活动对象并切换到EDIT模式
     bpy.context.view_layer.objects.active = rig
@@ -173,6 +173,115 @@ def add_constraint3(constraint_List,preset_dict):
                 created_rel_constraints += 1
     print(f"rel约束创建数: {created_rel_constraints}")
 
+
+def add_simple_source_controllers_for_unmapped_bones(rig, source_arm):
+    """Create simple controllers for selected source-only bones and constrain source bones to them."""
+    if rig is None or source_arm is None:
+        return 0
+
+    existing_targets = set()
+    for pb in source_arm.pose.bones:
+        for con in pb.constraints:
+            if con.name.startswith("rel_"):
+                existing_targets.add(pb.name)
+                break
+
+    candidates = []
+    for pb in source_arm.pose.bones:
+        name_lower = pb.name.lower()
+        if pb.name in existing_targets:
+            continue
+        # Current use-case: Genesis9 metacarpals and similar palm helper bones.
+        if "metacarpal" not in name_lower:
+            continue
+        candidates.append(pb.name)
+
+    if not candidates:
+        return 0
+
+    world_to_rig = rig.matrix_world.inverted()
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    rig.select_set(True)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    created = []
+    for src_name in candidates:
+        src_pb = source_arm.pose.bones.get(src_name)
+        if src_pb is None:
+            continue
+
+        ctrl_name = f"MMR_SRC_{src_name}"
+        if ctrl_name in rig.data.edit_bones:
+            created.append(ctrl_name)
+            continue
+
+        eb = rig.data.edit_bones.new(ctrl_name)
+        src_head_w = source_arm.matrix_world @ src_pb.head
+        src_tail_w = source_arm.matrix_world @ src_pb.tail
+        eb.head = world_to_rig @ src_head_w
+        eb.tail = world_to_rig @ src_tail_w
+        if (eb.tail - eb.head).length < 1e-4:
+            eb.tail = eb.head.copy()
+            eb.tail[1] -= 0.03
+
+        src_lower = src_name.lower()
+        if src_lower.startswith("l_") and "hand_fk.L" in rig.data.edit_bones:
+            eb.parent = rig.data.edit_bones["hand_fk.L"]
+        elif src_lower.startswith("r_") and "hand_fk.R" in rig.data.edit_bones:
+            eb.parent = rig.data.edit_bones["hand_fk.R"]
+        elif src_lower.startswith("l_") and "hand.L" in rig.data.edit_bones:
+            eb.parent = rig.data.edit_bones["hand.L"]
+        elif src_lower.startswith("r_") and "hand.R" in rig.data.edit_bones:
+            eb.parent = rig.data.edit_bones["hand.R"]
+        else:
+            eb.parent = rig.data.edit_bones.get("root")
+
+        created.append(ctrl_name)
+
+    bpy.ops.object.mode_set(mode='POSE')
+    coll = rig.data.collections_all.get("MMR Extra Source")
+    if coll is None:
+        coll = rig.data.collections.new("MMR Extra Source")
+    coll.is_visible = True
+
+    for ctrl_name in created:
+        bone = rig.data.bones.get(ctrl_name)
+        if bone is not None:
+            try:
+                coll.assign(bone)
+            except Exception:
+                pass
+            pb = rig.pose.bones.get(ctrl_name)
+            if pb is not None:
+                pb.lock_scale = [True, True, True]
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    source_arm.select_set(True)
+    bpy.context.view_layer.objects.active = source_arm
+    bpy.ops.object.mode_set(mode='POSE')
+
+    constrained = 0
+    for src_name in candidates:
+        ctrl_name = f"MMR_SRC_{src_name}"
+        src_pb = source_arm.pose.bones.get(src_name)
+        if src_pb is None:
+            continue
+        for con in list(src_pb.constraints):
+            if con.name == "MMR_extra_source_copy":
+                src_pb.constraints.remove(con)
+        con = src_pb.constraints.new(type='COPY_TRANSFORMS')
+        con.name = "MMR_extra_source_copy"
+        con.target = rig
+        con.subtarget = ctrl_name
+        con.owner_space = 'WORLD'
+        con.target_space = 'WORLD'
+        constrained += 1
+
+    return constrained
+
 def RIG2(context):
 
     #属性准备阶段
@@ -208,6 +317,29 @@ def RIG2(context):
         return{False}
 
     #生成字典
+    def _prefer_new_mapping(bone_type, old_name, new_name):
+        old_lower = old_name.lower()
+        new_lower = new_name.lower()
+
+        # Genesis9 常见情况：metacarpal 与 *_1 同时映射到同一指骨控制器。
+        # 若保留 metacarpal，会导致手指旋转驱动偏移；这里优先保留非 metacarpal 的那根。
+        if bone_type.startswith("f_") and ".01." in bone_type:
+            old_is_meta = "metacarpal" in old_lower
+            new_is_meta = "metacarpal" in new_lower
+            if old_is_meta and not new_is_meta:
+                return True
+            if new_is_meta and not old_is_meta:
+                return False
+
+        return False
+
+    def _should_skip_mapping(bone_type, source_name):
+        source_lower = source_name.lower()
+        # 明确忽略掌骨：不让手指控制器绑定到 metacarpal。
+        if bone_type.startswith("f_") and ".01." in bone_type and "metacarpal" in source_lower:
+            return True
+        return False
+
     unconnect_bone=['spine']
     mmd_bones_list=mmd_arm.pose.bones.keys()
     preset_dict={}
@@ -215,9 +347,17 @@ def RIG2(context):
     for bone in mmd_arm.pose.bones:
         name=bone.name
         if bone.mmr_bone.bone_type !='None':
-            # 同一bone_type可能在预设里出现多次（例如 neck1/neck2 -> spine.005），
-            # 这里保留首个映射，避免后写覆盖导致上段骨骼丢失绑定。
+            if _should_skip_mapping(bone.mmr_bone.bone_type, bone.name):
+                continue
+            # 同一 bone_type 可能在预设里出现多次（例如 twist1/twist2，或 Genesis9 的 metacarpal 与 *_1）。
+            # 默认保留首个；但遇到手指 metacarpal 冲突时，用更合理的 *_1 关节覆盖。
             if bone.mmr_bone.bone_type not in preset_dict:
+                preset_dict[bone.mmr_bone.bone_type]=bone.name
+            elif _prefer_new_mapping(
+                bone.mmr_bone.bone_type,
+                preset_dict[bone.mmr_bone.bone_type],
+                bone.name,
+            ):
                 preset_dict[bone.mmr_bone.bone_type]=bone.name
         if bone.mmr_bone.bone_type in unconnect_bone:
             mmd_arm.data.edit_bones[name].use_connect = False
@@ -729,52 +869,52 @@ def RIG2(context):
             print("⚠ 警告: 缺少必要的骨骼，跳过肩膀联动设置")
         else:
             bpy.ops.object.mode_set(mode = 'EDIT')
-            auto_shulder_L=Center=rig.data.edit_bones.new(name='auto_shulder_L')
-            auto_shulder_L.head=rig.data.edit_bones['shoulder.L'].head
-            auto_shulder_L.tail=rig.data.edit_bones['shoulder.L'].tail
-            auto_shulder_L.roll=rig.data.edit_bones['shoulder.L'].roll
-            auto_shulder_L.parent=rig.data.edit_bones['upper_arm_ik.L']
+            auto_shoulder_L=Center=rig.data.edit_bones.new(name='auto_shoulder_L')
+            auto_shoulder_L.head=rig.data.edit_bones['shoulder.L'].head
+            auto_shoulder_L.tail=rig.data.edit_bones['shoulder.L'].tail
+            auto_shoulder_L.roll=rig.data.edit_bones['shoulder.L'].roll
+            auto_shoulder_L.parent=rig.data.edit_bones['upper_arm_ik.L']
 
-            auto_shulder_R=Center=rig.data.edit_bones.new(name='auto_shulder_R')
-            auto_shulder_R.head=rig.data.edit_bones['shoulder.R'].head
-            auto_shulder_R.tail=rig.data.edit_bones['shoulder.R'].tail
-            auto_shulder_R.roll=rig.data.edit_bones['shoulder.R'].roll
-            auto_shulder_R.parent=rig.data.edit_bones['upper_arm_ik.R']
+            auto_shoulder_R=Center=rig.data.edit_bones.new(name='auto_shoulder_R')
+            auto_shoulder_R.head=rig.data.edit_bones['shoulder.R'].head
+            auto_shoulder_R.tail=rig.data.edit_bones['shoulder.R'].tail
+            auto_shoulder_R.roll=rig.data.edit_bones['shoulder.R'].roll
+            auto_shoulder_R.parent=rig.data.edit_bones['upper_arm_ik.R']
 
             bpy.ops.object.mode_set(mode = 'POSE')
-            if "shoulder.L" in rig.pose.bones and "auto_shulder_L" in rig.pose.bones:
+            if "shoulder.L" in rig.pose.bones and "auto_shoulder_L" in rig.pose.bones:
                 shoulder_L=rig.pose.bones["shoulder.L"]
-                auto_shulder_L=rig.pose.bones["auto_shulder_L"]
+                auto_shoulder_L=rig.pose.bones["auto_shoulder_L"]
                 shoulder_L_c=shoulder_L.constraints.new('COPY_ROTATION')
                 shoulder_L_c.name='MMR_auto_shoulder'
                 shoulder_L_c.target=rig
-                shoulder_L_c.subtarget='auto_shulder_L'
+                shoulder_L_c.subtarget='auto_shoulder_L'
                 shoulder_L_c.influence=0.5
-                auto_shoulder_L_c=auto_shulder_L.constraints.new('LIMIT_ROTATION')
+                auto_shoulder_L_c=auto_shoulder_L.constraints.new('LIMIT_ROTATION')
                 auto_shoulder_L_c.name='MMR_auto_shoulder'
                 auto_shoulder_L_c.use_limit_x=True
                 auto_shoulder_L_c.min_x = -0.35
                 auto_shoulder_L_c.max_x = 1.57
                 auto_shoulder_L_c.owner_space = 'LOCAL_WITH_PARENT'
                 if "ORG-shoulder.L" in rig.data.bones:
-                    copy_bone_collections(rig.data.bones["ORG-shoulder.L"], auto_shulder_L.bone)
+                    copy_bone_collections(rig.data.bones["ORG-shoulder.L"], auto_shoulder_L.bone)
 
-            if "shoulder.R" in rig.pose.bones and "auto_shulder_R" in rig.pose.bones:
+            if "shoulder.R" in rig.pose.bones and "auto_shoulder_R" in rig.pose.bones:
                 shoulder_R=rig.pose.bones["shoulder.R"]
-                auto_shulder_R=rig.pose.bones["auto_shulder_R"]
+                auto_shoulder_R=rig.pose.bones["auto_shoulder_R"]
                 shoulder_R_c=shoulder_R.constraints.new('COPY_ROTATION')
                 shoulder_R_c.name='MMR_auto_shoulder'
                 shoulder_R_c.target=rig
-                shoulder_R_c.subtarget='auto_shulder_R'
+                shoulder_R_c.subtarget='auto_shoulder_R'
                 shoulder_R_c.influence=0.5
-                auto_shoulder_R_c=auto_shulder_R.constraints.new('LIMIT_ROTATION')
+                auto_shoulder_R_c=auto_shoulder_R.constraints.new('LIMIT_ROTATION')
                 auto_shoulder_R_c.name='MMR_auto_shoulder'
                 auto_shoulder_R_c.use_limit_x=True
                 auto_shoulder_R_c.min_x = -0.35
                 auto_shoulder_R_c.max_x = 1.57
                 auto_shoulder_R_c.owner_space = 'LOCAL_WITH_PARENT'
                 if "ORG-shoulder.R" in rig.data.bones:
-                    copy_bone_collections(rig.data.bones["ORG-shoulder.R"], auto_shulder_R.bone)
+                    copy_bone_collections(rig.data.bones["ORG-shoulder.R"], auto_shoulder_R.bone)
 
     #上半身控制器
 
@@ -982,6 +1122,10 @@ def RIG2(context):
     # 注意：add_constraint3内部会处理模式切换和活动对象设置
     add_constraint3(constraints_list,preset_dict)
 
+    if getattr(mmr_property, "extra_source_controllers", False):
+        extra_count = add_simple_source_controllers_for_unmapped_bones(rig, mmd_arm)
+        print(f"额外源骨骼控制器创建数: {extra_count}")
+
     bpy.ops.object.mode_set(mode = 'POSE')
     
     #修正rigifyIK控制器范围限制
@@ -1094,14 +1238,24 @@ def RIG2(context):
         rig.pose.bones["root"].custom_shape_scale_xyz=(0.4,0.4,0.4)'''
 
 
-    #隐藏部分控制器
-    #hide some controller
-    hide_conllections = ["Face (Primary)", "Face (Secondary)", "Torso (Tweak)", "Fingers (Detail)", "Arm.L (FK)", "Arm.L (Tweak)", "Arm.R (FK)", "Arm.R (Tweak)", "Leg.L (FK)", "Leg.L (Tweak)", "Leg.R (FK)", "Leg.R (Tweak)"]
+    # 初始显示：隐藏 Face / FK，保留并展示各类 Tweak 层
+    hide_collections = [
+        "Face (Primary)", "Face (Secondary)", "Face",
+        "Arm.L (FK)", "Arm.R (FK)", "Leg.L (FK)", "Leg.R (FK)",
+    ]
+    show_collections = [
+        "Torso (Tweak)", "Arm.L (Tweak)", "Arm.R (Tweak)",
+        "Leg.L (Tweak)", "Leg.R (Tweak)", "Fingers (Detail)",
+    ]
 
-    for collection_name in hide_conllections:
-        rig.data.collections_all[collection_name].is_visible = False
-    if 'eye.L' not in preset_dict or 'eye.R' not in preset_dict:
-        rig.data.collections_all["Face"].is_visible = False
+    for collection_name in hide_collections:
+        collection = rig.data.collections_all.get(collection_name)
+        if collection is not None:
+            collection.is_visible = False
+    for collection_name in show_collections:
+        collection = rig.data.collections_all.get(collection_name)
+        if collection is not None:
+            collection.is_visible = True
 
     #锁定移动的骨骼列表
     #lock the location of these bone
@@ -1169,8 +1323,8 @@ def RIG2(context):
     bpy.context.scene.tool_settings.transform_pivot_point = 'INDIVIDUAL_ORIGINS'
     if area and bpy.context.area:
         bpy.context.area.type = area
-    logging.info("完成"+'匹配骨骼数:'+str(match_bone_nunber))
-    alert_error("提示","完成"+'匹配骨骼数:'+str(match_bone_nunber))
+    logging.info("完成"+'匹配骨骼数:'+str(match_bone_number))
+    alert_error("提示","完成"+'匹配骨骼数:'+str(match_bone_number))
     return(True)
 
 def decorate_mmd_arm(context):
