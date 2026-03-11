@@ -100,6 +100,11 @@ def get_ai_mapping_prompt_text():
 **Arms (L/R):** shoulder.L/R, upper_arm.L/R, ArmTwist_L/R (optional), forearm.L/R, HandTwist_L/R (optional), hand.L/R
 **Fingers (3 segments each, L/R):** thumb.01–03, f_index.01–03, f_middle.01–03, f_ring.01–03, f_pinky.01–03
 
+**Critical finger rule (Genesis9-like hands):**
+- Do NOT map metacarpal/palm helper bones (e.g. `*_metacarpal`, `*metacarpal*`) to finger controllers.
+- Finger controllers (`f_*.01`) must map to the first real finger phalanx (e.g. index1/mid1/ring1/pinky1), not palm bones.
+- If both metacarpal and finger-1 candidates exist, choose finger-1 and skip metacarpal entries.
+
 **Legs (L/R):** thigh.L/R, shin.L/R, foot.L/R, toe.L/R (optional), ToeTipIK_L/R (optional), LegIK_L/R (for retarget)
 
 **Toes (optional, L/R):** toe_thumb.01–02, toe_index.01–02, toe_middle.01–02, toe_ring.01–02, toe_pinky.01–02
@@ -118,7 +123,7 @@ Invalid: do not output {"rig": {"MyPreset": { ... }}}. Output only the inner { "
 
 ## Task
 
-Using the skeleton structure and bone name semantics provided by the user, produce the full mapping JSON. Only include bones that have a clear semantic match. Use L/R suffix for left/right. Remember: head bone → spine.007; if there are more spine segments than spine..001–.007, shorten so that head = spine.007.
+Using the skeleton structure and bone name semantics provided by the user, produce the full mapping JSON. Only include bones that have a clear semantic match. Use L/R suffix for left/right. Remember: head bone → spine.007; if there are more spine segments than spine..001–.007, shorten so that head = spine.007. For finger mapping, skip metacarpal/palm helper bones and map only real finger segments.
 """
 
 
