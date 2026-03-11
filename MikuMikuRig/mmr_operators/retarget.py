@@ -123,12 +123,20 @@ def retarget_mixmao(OT,context):
     #from_to_dict={}
     type_from_to_list=[]
     match_bone_number=0
+    def _get_bone_type(pose_bone):
+        bone_type = getattr(pose_bone, "mmr_bone_type", None)
+        if bone_type is None and hasattr(pose_bone, "mmr_bone"):
+            bone_type = getattr(pose_bone.mmr_bone, "bone_type", None)
+        return bone_type or ""
+
     for bone in mixamo_arm.pose.bones:
-        if bone.mmr_bone.bone_type !='None':
-            from_dict[bone.mmr_bone.bone_type]=bone.name
+        bone_type = _get_bone_type(bone)
+        if bone_type not in ("", "None"):
+            from_dict[bone_type]=bone.name
     for bone in rigify_arm.pose.bones:
-        if bone.mmr_bone.bone_type !='None':
-            to_dict[bone.mmr_bone.bone_type]=bone.name
+        bone_type = _get_bone_type(bone)
+        if bone_type not in ("", "None"):
+            to_dict[bone_type]=bone.name
     for bone_type,from_name in from_dict.items():
         if bone_type in to_dict:
             to_name=to_dict[bone_type]
@@ -618,12 +626,18 @@ def load_vmd(OT,context):
     'f_ring.01.R':'右薬指１','f_ring.02.R':'右薬指２','f_ring.03.R':'右薬指３',
     'f_pinky.01.R':'右小指１','f_pinky.02.R':'右小指２','f_pinky.03.R':'右小指３'
     }
+    def _get_bone_type(pose_bone):
+        bone_type = getattr(pose_bone, "mmr_bone_type", None)
+        if bone_type is None and hasattr(pose_bone, "mmr_bone"):
+            bone_type = getattr(pose_bone.mmr_bone, "bone_type", None)
+        return bone_type or ""
+
     rigify_dict={}
     for bone in rigify_arm2.pose.bones:
         bone1=rigify_arm.pose.bones[bone.name]
-        bone_type=bone.mmr_bone.bone_type
-        if bone_type != 'None':
-            rigify_dict[bone.mmr_bone.bone_type]=bone.name
+        bone_type=_get_bone_type(bone)
+        if bone_type not in ("", "None"):
+            rigify_dict[bone_type]=bone.name
             if bone_type in mmd_dict:
                 bone.mmd_bone.name_j=mmd_dict[bone_type]
                 bone1.rotation_mode = 'QUATERNION'

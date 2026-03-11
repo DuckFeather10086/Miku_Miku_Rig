@@ -340,26 +340,40 @@ def RIG2(context):
             return True
         return False
 
+    def _get_bone_type(pose_bone):
+        # New preset field is PoseBone.mmr_bone_type; keep backward compatibility for old files.
+        bone_type = getattr(pose_bone, "mmr_bone_type", None)
+        if bone_type is None and hasattr(pose_bone, "mmr_bone"):
+            bone_type = getattr(pose_bone.mmr_bone, "bone_type", None)
+        return bone_type or ""
+
+    def _get_bone_invert(pose_bone):
+        invert = getattr(pose_bone, "mmr_bone_invert", None)
+        if invert is None and hasattr(pose_bone, "mmr_bone"):
+            invert = getattr(pose_bone.mmr_bone, "invert", None)
+        return bool(invert)
+
     unconnect_bone=['spine']
     mmd_bones_list=mmd_arm.pose.bones.keys()
     preset_dict={}
     bpy.ops.object.mode_set(mode = 'EDIT')
     for bone in mmd_arm.pose.bones:
         name=bone.name
-        if bone.mmr_bone.bone_type !='None':
-            if _should_skip_mapping(bone.mmr_bone.bone_type, bone.name):
+        bone_type = _get_bone_type(bone)
+        if bone_type not in ("", "None"):
+            if _should_skip_mapping(bone_type, bone.name):
                 continue
             # 同一 bone_type 可能在预设里出现多次（例如 twist1/twist2，或 Genesis9 的 metacarpal 与 *_1）。
             # 默认保留首个；但遇到手指 metacarpal 冲突时，用更合理的 *_1 关节覆盖。
-            if bone.mmr_bone.bone_type not in preset_dict:
-                preset_dict[bone.mmr_bone.bone_type]=bone.name
+            if bone_type not in preset_dict:
+                preset_dict[bone_type]=bone.name
             elif _prefer_new_mapping(
-                bone.mmr_bone.bone_type,
-                preset_dict[bone.mmr_bone.bone_type],
+                bone_type,
+                preset_dict[bone_type],
                 bone.name,
             ):
-                preset_dict[bone.mmr_bone.bone_type]=bone.name
-        if bone.mmr_bone.bone_type in unconnect_bone:
+                preset_dict[bone_type]=bone.name
+        if bone_type in unconnect_bone:
             mmd_arm.data.edit_bones[name].use_connect = False
 
     bpy.ops.object.mode_set(mode = 'OBJECT')
@@ -538,20 +552,20 @@ def RIG2(context):
     #新骨骼匹配方法
 
     for bone in mmd_arm.pose.bones:
-        bone_type=bone.mmr_bone.bone_type
-        if bone_type!="None" and bone_type in rigify_bones_list:
+        bone_type=_get_bone_type(bone)
+        if bone_type not in ("", "None") and bone_type in rigify_bones_list:
             rigify_bone=rigify_arm.data.edit_bones[bone_type]
-            if bone.mmr_bone.invert:
+            if _get_bone_invert(bone):
                 rigify_bone.tail=bone.head
             else:
                 rigify_bone.tail=bone.tail
 
     for bone in mmd_arm.pose.bones:
-        bone_type=bone.mmr_bone.bone_type
-        if bone_type!="None" and bone_type in rigify_bones_list:
+        bone_type=_get_bone_type(bone)
+        if bone_type not in ("", "None") and bone_type in rigify_bones_list:
             rigify_bone=rigify_arm.data.edit_bones[bone_type]
             remain_bone.discard(bone_type)
-            if bone.mmr_bone.invert: # 此处会导致骨骼消失
+            if _get_bone_invert(bone): # 此处会导致骨骼消失
                 rigify_bone.head=bone.tail
             else:
                 rigify_bone.head=bone.head
