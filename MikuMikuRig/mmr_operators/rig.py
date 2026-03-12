@@ -297,6 +297,14 @@ def RIG2(context):
         context.area.type = 'VIEW_3D'
 
     mmd_arm=context.view_layer.objects.active
+    
+    # Check and remove existing _Rig if present (override mode)
+    existing_rig_name = mmd_arm.name + '_Rig'
+    if existing_rig_name in bpy.data.objects:
+        existing_rig = bpy.data.objects[existing_rig_name]
+        print(f"✓ 发现已存在的 Rig: {existing_rig_name}，将替换它")
+        bpy.data.objects.remove(existing_rig, do_unlink=True)
+    
     extra.set_min_ik_loop(mmd_arm,10)
 
     scene=context.scene
