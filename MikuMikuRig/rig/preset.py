@@ -1,7 +1,7 @@
-from types import prepare_class
 import bpy
 import os
 import json
+from .. import base
 from . import rig
 
 #骨骼枚举属性部分
@@ -281,13 +281,12 @@ class OT_Delete_Preset(bpy.types.Operator):
         layout.label(text="真的要删除预设吗？")
 
     def execute(self,context):
+        if self.preset_type != 'rig':
+            return {'CANCELLED'}
         scene=context.scene
         mmr_property=scene.mmr_property
-        if self.preset_type == 'rig':
-            name=mmr_property.rig_preset_name
-        elif self.preset_type == 'retarget':
-            name=mmr_property.retarget_preset_name
-        delete_preset(name,self.preset_type)
+        name = mmr_property.rig_preset_name
+        delete_preset(name, self.preset_type)
         return{"FINISHED"}
 
 class OT_Read_Preset(bpy.types.Operator):
@@ -305,6 +304,8 @@ class OT_Read_Preset(bpy.types.Operator):
         layout.label(text="真的要读取预设吗？")
 
     def execute(self,context):
+        if self.preset_type != 'rig':
+            return {'CANCELLED'}
         scene=context.scene
         mmr_property=scene.mmr_property
         if rig.check_arm()==False:
@@ -312,10 +313,7 @@ class OT_Read_Preset(bpy.types.Operator):
         obj = context.object
         pose=obj.pose
         preset_dict=preset_dict_dict[self.preset_type]
-        if self.preset_type == 'rig':
-            name=mmr_property.rig_preset_name
-        elif self.preset_type == 'retarget':
-            name=mmr_property.retarget_preset_name
+        name = mmr_property.rig_preset_name
         preset=preset_dict[name]
         set_bone_type(pose,preset)
         return{"FINISHED"}
@@ -335,14 +333,13 @@ class OT_Overwrite_Preset(bpy.types.Operator):
         layout.label(text="真的要覆盖预设吗？")
 
     def execute(self,context):
+        if self.preset_type != 'rig':
+            return {'CANCELLED'}
         scene=context.scene
         mmr_property=scene.mmr_property
         if rig.check_arm()==False:
             return{"CANCELLED"}
-        if self.preset_type == 'rig':
-            name=mmr_property.rig_preset_name
-        elif self.preset_type == 'retarget':
-            name=mmr_property.retarget_preset_name
+        name = mmr_property.rig_preset_name
         obj = context.object
         pose=obj.pose
         preset=get_preset(pose)
@@ -459,7 +456,7 @@ class OT_Rig_Preset(bpy.types.Operator):
             preset_dict=preset_dict_dict['rig']
             preset_name=mmr_property.rig_preset_name
             if preset_name not in preset_dict:
-                rig.alert_error("提示", f'预设 "{preset_name}" 不存在')
+                base.alert_error("提示", f'预设 "{preset_name}" 不存在')
                 return{"CANCELLED"}
             preset=preset_dict[preset_name]
             
@@ -492,8 +489,6 @@ def _find_source_armature(context, preset):
         return None
 
     preset_bones = set(preset.keys())
-    if any(name in obj.pose.bones for name in preset_bones):
-        return obj
 
     if obj.name.endswith("_Rig"):
         source_name = obj.name[:-4]
@@ -501,6 +496,9 @@ def _find_source_armature(context, preset):
         if source_obj and source_obj.type == 'ARMATURE' and source_obj.pose is not None:
             if any(name in source_obj.pose.bones for name in preset_bones):
                 return source_obj
+
+    if any(name in obj.pose.bones for name in preset_bones):
+        return obj
     return None
 
 def set_keymap():
@@ -665,15 +663,9 @@ class OT_QA_Skip(bpy.types.Operator):
 
         return{"FINISHED"}
 
-#UI菜单部分
+# UI: use base.Mmr_Panel_Base
 
-class Mmr_Panel_Base(bpy.types.Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "MMR"
-    bl_context = "objectmode"
-
-class MMR_Arm_Panel(Mmr_Panel_Base):
+class MMR_Arm_Panel(base.Mmr_Panel_Base):
     bl_idname="MMR_PT_panel_12"
     bl_label = "Controller Preset"
     bl_context = ""
@@ -728,7 +720,7 @@ class MMR_Arm_Panel(Mmr_Panel_Base):
                 layout.prop(mmr_property,'pole_target',text="Use pole target")
                 layout.prop(mmr_property,'extra_source_controllers',text="Extra source controllers")
 
-class MMR_Bone_Panel(Mmr_Panel_Base):
+class MMR_Bone_Panel(base.Mmr_Panel_Base):
     bl_idname="MMR_PT_panel_11"
     bl_label = 'MMR Bone Type'
     bl_space_type = 'PROPERTIES'
@@ -753,48 +745,8 @@ class MMR_Bone_Panel(Mmr_Panel_Base):
         layout.prop(pose_bone, 'mmr_bone_type', text='Bone Type',translate =False)
         layout.prop(pose_bone, 'mmr_bone_invert', text='Invert')
 
-class MMR_Retarget_Panel(Mmr_Panel_Base):
-    bl_idname="MMR_PT_panel_13"
-    bl_label = "Retarget" #菜单名
-    bl_context = ""
-
-    def draw(self, context):
-        scene=context.scene
-        mmr_property=scene.mmr_property
-        layout = self.layout
-        row = layout.row()
-        row.prop(mmr_property, 'retarget_preset_name', text='preset')
-        if mmr_property.retarget_preset_name not in built_in_retarget_dict_list or mmr_property.debug:
-            row = layout.row()
-            row.operator("mmr.add_preset").preset_type='retarget'
-            row.operator("mmr.delete_preset").preset_type='retarget'
-            row = layout.row()
-            row.operator("mmr.read_preset").preset_type='retarget'
-            row.operator("mmr.overwrite_preset").preset_type='retarget'
-        else:
-            row = layout.row()
-            row.operator("mmr.add_preset").preset_type='retarget'
-            row.operator("mmr.read_preset").preset_type='retarget'
-        layout.operator("mmr.reload_presets", text="Reload preset.json")
-        layout.label(text="Select rigify controller then press the button")
-        #row=layout.row()
-        #row.label(text='Arm:',translate =False)
-        #row.prop(mmr_property, 'IKFK_arm',expand=True)
-        #row=layout.row()
-        #row.label(text='Leg:',translate =False)
-        #row.prop(mmr_property, 'IKFK_leg',expand=True)
-        layout.operator("mmr.import_mixamo",text="Import FBX/BVH")
-        layout.operator("mmr.import_vmd",text="Import VMD")
-        layout.operator("mmr.export_vmd",text="Bake and export VMD animation")
-        layout.prop(mmr_property, "extra_options2", toggle=True,text='Extra Options')
-        if mmr_property.extra_options2:
-            layout.prop(mmr_property,'fade_in_out',text="Fade in out")
-            layout.prop(mmr_property,'auto_action_scale',text="Auto animation scale")
-            if mmr_property.auto_action_scale==False:
-                layout.prop(mmr_property,'action_scale',text="Animation scale")
-            layout.prop(mmr_property,'lock_location',text="Lock animation location")
-            layout.prop(mmr_property,'import_as_NLA_strip',text="Import as NLA strip")
 Class_list=[
-    MMR_Bone_Panel,MMR_Arm_Panel,OT_Add_Preset,OT_Delete_Preset,OT_Read_Preset,OT_Overwrite_Preset,OT_Copy_AI_Prompt,OT_Reload_Presets,OT_Add_Preset_From_Clipboard,OT_Rig_Preset,
-    OT_QA_Start,OT_QA_End,OT_QA_Assign,OT_QA_Assign_Invert,OT_QA_Skip,MMR_Retarget_Panel,
+    MMR_Bone_Panel, MMR_Arm_Panel, OT_Add_Preset, OT_Delete_Preset, OT_Read_Preset, OT_Overwrite_Preset,
+    OT_Copy_AI_Prompt, OT_Reload_Presets, OT_Add_Preset_From_Clipboard, OT_Rig_Preset,
+    OT_QA_Start, OT_QA_End, OT_QA_Assign, OT_QA_Assign_Invert, OT_QA_Skip,
 ]

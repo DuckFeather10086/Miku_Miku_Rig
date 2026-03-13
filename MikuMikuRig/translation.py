@@ -77,3 +77,11 @@ def register_module():
 def unregister_module():
     global addon_name
     bpy.app.translations.unregister(addon_name)
+
+
+def register():
+    register_module()
+
+
+def unregister():
+    unregister_module()

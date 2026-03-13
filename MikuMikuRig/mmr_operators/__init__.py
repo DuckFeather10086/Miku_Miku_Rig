@@ -1,12 +1,8 @@
 import bpy
 
-from . import preset
-from . import rig
-from . import retarget
-from . import physics
 from . import extra
 
-Model_list=[preset,rig,retarget,physics,extra]
+Model_list = [extra]
 
 def register():
     for Model in Model_list:

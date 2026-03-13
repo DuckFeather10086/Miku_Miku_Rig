@@ -3,29 +3,12 @@ import os
 import logging
 import mathutils
 from bpy.types import Operator
+from .. import base
 from . import preset
-from . import extra
 
 def copy_bone_collections(source_bone: bpy.types.Bone, target_bone: bpy.types.Bone):
     for collection in source_bone.collections:
         collection.assign(target_bone)
-
-def alert_error(title,message):
-    # 在无头模式下使用print，避免popup_menu导致崩溃
-    # 检查是否在无头模式下运行（没有窗口或区域）
-    is_headless = bpy.app.background or not bpy.context.area
-    if is_headless:
-        print(f"[{title}] {message}")
-    else:
-        try:
-            def draw(self,context):
-                self.layout.label(text=str(message))
-            if bpy.context.window_manager:
-                bpy.context.window_manager.popup_menu(draw,title=title,icon='ERROR')
-            else:
-                print(f"[{title}] {message}")
-        except:
-            print(f"[{title}] {message}")
 
 def check_arm():
     
@@ -33,17 +16,17 @@ def check_arm():
 
     if 'rigify' not in bpy.context.preferences.addons.keys():
         logging.info("检测到未开启rigify，已自动开启")
-        alert_error("提示","检测到未开启rigify，已自动开启")
+        base.alert_error("提示","检测到未开启rigify，已自动开启")
         bpy.ops.preferences.addon_enable(module="rigify")
 
     if arm==None:
         logging.info("未选择骨骼！")
-        alert_error("提示","未选择骨骼！")
+        base.alert_error("提示","未选择骨骼！")
         return(False)
 
     elif arm.type!='ARMATURE':
         logging.info("所选对象不是骨骼！")
-        alert_error("提示","所选对象不是骨骼！")
+        base.alert_error("提示","所选对象不是骨骼！")
         return(False) 
 
     return (True)
@@ -305,7 +288,8 @@ def RIG2(context):
         print(f"✓ 发现已存在的 Rig: {existing_rig_name}，将替换它")
         bpy.data.objects.remove(existing_rig, do_unlink=True)
     
-    extra.set_min_ik_loop(mmd_arm,10)
+    from ..mmr_operators import extra
+    extra.set_min_ik_loop(mmd_arm, 10)
 
     scene=context.scene
     mmr_property=scene.mmr_property
@@ -1346,7 +1330,7 @@ def RIG2(context):
     if area and bpy.context.area:
         bpy.context.area.type = area
     logging.info("完成"+'匹配骨骼数:'+str(match_bone_number))
-    alert_error("提示","完成"+'匹配骨骼数:'+str(match_bone_number))
+    base.alert_error("提示","完成"+'匹配骨骼数:'+str(match_bone_number))
     return(True)
 
 def decorate_mmd_arm(context):
