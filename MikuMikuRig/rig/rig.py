@@ -1,5 +1,6 @@
 import bpy
 import os
+import re
 import logging
 import mathutils
 from bpy.types import Operator
@@ -9,6 +10,47 @@ from . import preset
 def copy_bone_collections(source_bone: bpy.types.Bone, target_bone: bpy.types.Bone):
     for collection in source_bone.collections:
         collection.assign(target_bone)
+
+
+_G8_TOE_BASE_RE = re.compile(r"^[lr](BigToe|SmallToe[1-4])$", re.IGNORECASE)
+
+
+def fix_daz_genesis8_toe_hierarchy(mmd_arm):
+    """Daz Genesis 8 导出常把各趾第一节挂在 lToe/rToe 下；改为与 lToe/rToe 同级、挂在跖骨（或脚掌）下。"""
+    if mmd_arm.type != "ARMATURE":
+        return
+    edit_bones = mmd_arm.data.edit_bones
+    for side in ("l", "r"):
+        toe_name = f"{side}Toe"
+        if toe_name not in edit_bones:
+            continue
+        toe_eb = edit_bones[toe_name]
+        meta_name = f"{side}Metatarsals"
+        foot_name = f"{side}Foot"
+        new_parent = None
+        if meta_name in edit_bones:
+            new_parent = edit_bones[meta_name]
+        elif foot_name in edit_bones:
+            new_parent = edit_bones[foot_name]
+        else:
+            continue
+        moved = 0
+        for eb in list(edit_bones):
+            if eb.parent != toe_eb:
+                continue
+            if not _G8_TOE_BASE_RE.match(eb.name):
+                continue
+            eb.parent = new_parent
+            eb.use_connect = False
+            moved += 1
+        if moved:
+            logging.info(
+                "Genesis8 脚趾层级: 已将 %d 根趾骨从 %s 挂到 %s",
+                moved,
+                toe_name,
+                new_parent.name,
+            )
+
 
 def check_arm():
     
@@ -349,6 +391,7 @@ def RIG2(context):
     mmd_bones_list=mmd_arm.pose.bones.keys()
     preset_dict={}
     bpy.ops.object.mode_set(mode = 'EDIT')
+    fix_daz_genesis8_toe_hierarchy(mmd_arm)
     for bone in mmd_arm.pose.bones:
         name=bone.name
         bone_type = _get_bone_type(bone)

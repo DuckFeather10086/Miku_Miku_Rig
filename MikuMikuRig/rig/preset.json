@@ -1071,6 +1071,86 @@
                 "toe_pinky.02.R",
                 false
             ],
+            "lBigToe": [
+                "toe_thumb.01.L",
+                false
+            ],
+            "lBigToe_2": [
+                "toe_thumb.02.L",
+                false
+            ],
+            "lSmallToe1": [
+                "toe_index.01.L",
+                false
+            ],
+            "lSmallToe1_2": [
+                "toe_index.02.L",
+                false
+            ],
+            "lSmallToe2": [
+                "toe_middle.01.L",
+                false
+            ],
+            "lSmallToe2_2": [
+                "toe_middle.02.L",
+                false
+            ],
+            "lSmallToe3": [
+                "toe_ring.01.L",
+                false
+            ],
+            "lSmallToe3_2": [
+                "toe_ring.02.L",
+                false
+            ],
+            "lSmallToe4": [
+                "toe_pinky.01.L",
+                false
+            ],
+            "lSmallToe4_2": [
+                "toe_pinky.02.L",
+                false
+            ],
+            "rBigToe": [
+                "toe_thumb.01.R",
+                false
+            ],
+            "rBigToe_2": [
+                "toe_thumb.02.R",
+                false
+            ],
+            "rSmallToe1": [
+                "toe_index.01.R",
+                false
+            ],
+            "rSmallToe1_2": [
+                "toe_index.02.R",
+                false
+            ],
+            "rSmallToe2": [
+                "toe_middle.01.R",
+                false
+            ],
+            "rSmallToe2_2": [
+                "toe_middle.02.R",
+                false
+            ],
+            "rSmallToe3": [
+                "toe_ring.01.R",
+                false
+            ],
+            "rSmallToe3_2": [
+                "toe_ring.02.R",
+                false
+            ],
+            "rSmallToe4": [
+                "toe_pinky.01.R",
+                false
+            ],
+            "rSmallToe4_2": [
+                "toe_pinky.02.R",
+                false
+            ],
             "rPectoral": [
                 "breast.L",
                 false
