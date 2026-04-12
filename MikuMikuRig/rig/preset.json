@@ -815,12 +815,20 @@
                 "spine.003",
                 false
             ],
-            "neckLower": [
+            "chestUpper": [
                 "spine.004",
                 false
             ],
-            "head": [
+            "neckLower": [
+                "spine.005",
+                false
+            ],
+            "neckUpper": [
                 "spine.006",
+                false
+            ],
+            "head": [
+                "spine.007",
                 false
             ],
             "lCollar": [
@@ -1152,11 +1160,11 @@
                 false
             ],
             "rPectoral": [
-                "breast.L",
+                "breast.R",
                 false
             ],
             "lPectoral": [
-                "breast.R",
+                "breast.L",
                 false
             ]
         },

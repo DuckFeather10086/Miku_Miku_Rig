@@ -1,6 +1,8 @@
 __pycache__
+.tmp_blender_tests/
 
 # 测试用 blend 与生成物（勿提交）
+MikuMikuRig/mmr_operators/body.blend
 MikuMikuRig/mmr_operators/chisaBody5.blend
 MikuMikuRig/mmr_operators/chisaBody5_rigged.blend
 MikuMikuRig/mmr_operators/chisaBody5_rigged.blend1
