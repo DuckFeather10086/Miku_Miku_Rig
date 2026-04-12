@@ -1158,14 +1158,6 @@
             "lPectoral": [
                 "breast.R",
                 false
-            ],
-            "Anus": [
-                "f_pinky.03.R",
-                false
-            ],
-            "Genitals": [
-                "f_pinky.03.R",
-                false
             ]
         },
         "Genesis9": {
@@ -2692,5 +2684,21 @@
                 false
             ]
         }
+    },
+    "rig_parent_overrides": {
+        "Genesis8": [
+            {
+                "from_parent": "lToe",
+                "to_parent": "lMetatarsals",
+                "fallback_to_parent": "lFoot",
+                "child_name_regex": "^l(BigToe|SmallToe[1-4])$"
+            },
+            {
+                "from_parent": "rToe",
+                "to_parent": "rMetatarsals",
+                "fallback_to_parent": "rFoot",
+                "child_name_regex": "^r(BigToe|SmallToe[1-4])$"
+            }
+        ]
     }
 }

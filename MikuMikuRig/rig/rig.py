@@ -12,44 +12,45 @@ def copy_bone_collections(source_bone: bpy.types.Bone, target_bone: bpy.types.Bo
         collection.assign(target_bone)
 
 
-_G8_TOE_BASE_RE = re.compile(r"^[lr](BigToe|SmallToe[1-4])$", re.IGNORECASE)
-
-
-def fix_daz_genesis8_toe_hierarchy(mmd_arm):
-    """Daz Genesis 8 导出常把各趾第一节挂在 lToe/rToe 下；改为与 lToe/rToe 同级、挂在跖骨（或脚掌）下。"""
-    if mmd_arm.type != "ARMATURE":
+def apply_rig_parent_overrides(mmd_arm, preset_name):
+    """Apply edit-bone parent overrides from preset.json key rig_parent_overrides[preset_name]."""
+    if not preset_name or mmd_arm.type != "ARMATURE":
+        return
+    rules = preset.preset_dict_dict.get("rig_parent_overrides", {}).get(preset_name)
+    if not rules:
         return
     edit_bones = mmd_arm.data.edit_bones
-    for side in ("l", "r"):
-        toe_name = f"{side}Toe"
-        if toe_name not in edit_bones:
+    for rule in rules:
+        if not isinstance(rule, dict):
             continue
-        toe_eb = edit_bones[toe_name]
-        meta_name = f"{side}Metatarsals"
-        foot_name = f"{side}Foot"
+        from_parent = rule.get("from_parent")
+        to_parent = rule.get("to_parent")
+        fallback = rule.get("fallback_to_parent")
+        pattern = rule.get("child_name_regex")
+        if not from_parent or not pattern:
+            continue
+        if from_parent not in edit_bones:
+            continue
+        from_eb = edit_bones[from_parent]
         new_parent = None
-        if meta_name in edit_bones:
-            new_parent = edit_bones[meta_name]
-        elif foot_name in edit_bones:
-            new_parent = edit_bones[foot_name]
+        if to_parent and to_parent in edit_bones:
+            new_parent = edit_bones[to_parent]
+        elif fallback and fallback in edit_bones:
+            new_parent = edit_bones[fallback]
         else:
             continue
-        moved = 0
+        try:
+            cre = re.compile(pattern)
+        except re.error as e:
+            logging.warning("rig_parent_overrides invalid regex %r: %s", pattern, e)
+            continue
         for eb in list(edit_bones):
-            if eb.parent != toe_eb:
+            if eb.parent != from_eb:
                 continue
-            if not _G8_TOE_BASE_RE.match(eb.name):
+            if not cre.match(eb.name):
                 continue
             eb.parent = new_parent
             eb.use_connect = False
-            moved += 1
-        if moved:
-            logging.info(
-                "Genesis8 脚趾层级: 已将 %d 根趾骨从 %s 挂到 %s",
-                moved,
-                toe_name,
-                new_parent.name,
-            )
 
 
 def check_arm():
@@ -391,7 +392,7 @@ def RIG2(context):
     mmd_bones_list=mmd_arm.pose.bones.keys()
     preset_dict={}
     bpy.ops.object.mode_set(mode = 'EDIT')
-    fix_daz_genesis8_toe_hierarchy(mmd_arm)
+    apply_rig_parent_overrides(mmd_arm, mmr_property.rig_preset_name)
     for bone in mmd_arm.pose.bones:
         name=bone.name
         bone_type = _get_bone_type(bone)
@@ -654,10 +655,28 @@ def RIG2(context):
     rigify_arm.data.edit_bones["hand.L"].tail=(rigify_arm.data.edit_bones["f_middle.01.L"].head+rigify_arm.data.edit_bones["f_ring.01.L"].head)/2
     rigify_arm.data.edit_bones["hand.R"].tail=(rigify_arm.data.edit_bones["f_middle.01.R"].head+rigify_arm.data.edit_bones["f_ring.01.R"].head)/2
 
-    # Genesis9 预设通常只有 toe.L/toe.R；补齐 ToeTipIK 映射，避免 toe 控制器失配
-    if "toe.L" in preset_dict and "ToeTipIK_L" not in preset_dict:
+    # Genesis9 等仅有脚掌+脚尖、无分趾映射时：把 ToeTipIK 指到与 toe 相同的源骨，避免 IK 失配。
+    # 已有完整分趾映射（toe_thumb.01 等）时不要这样做：否则 ToeTipIK 与 toe.L 同源，会在 DEF-toe 上叠两套约束，
+    # 且违背「总趾骨在 Rigify 内带子趾、各趾由各自源骨驱动」的预期。
+    _detail_toe_keys_L = (
+        "toe_thumb.01.L",
+        "toe_index.01.L",
+        "toe_middle.01.L",
+        "toe_ring.01.L",
+        "toe_pinky.01.L",
+    )
+    _detail_toe_keys_R = (
+        "toe_thumb.01.R",
+        "toe_index.01.R",
+        "toe_middle.01.R",
+        "toe_ring.01.R",
+        "toe_pinky.01.R",
+    )
+    has_detail_toes_L = any(k in preset_dict for k in _detail_toe_keys_L)
+    has_detail_toes_R = any(k in preset_dict for k in _detail_toe_keys_R)
+    if "toe.L" in preset_dict and "ToeTipIK_L" not in preset_dict and not has_detail_toes_L:
         preset_dict["ToeTipIK_L"] = preset_dict["toe.L"]
-    if "toe.R" in preset_dict and "ToeTipIK_R" not in preset_dict:
+    if "toe.R" in preset_dict and "ToeTipIK_R" not in preset_dict and not has_detail_toes_R:
         preset_dict["ToeTipIK_R"] = preset_dict["toe.R"]
 
     # 不再把 spine.006 自动复制给 spine.007。
@@ -672,7 +691,7 @@ def RIG2(context):
     rigify_arm.data.edit_bones["toe.L"].tail[1]-=rigify_arm.data.edit_bones["foot.L"].length/2
 
     rigify_arm.data.edit_bones["toe.R"].tail=rigify_arm.data.edit_bones["toe.R"].head
-    rigify_arm.data.edit_bones["toe.R"].tail[1]-=rigify_arm.data.edit_bones["foot.L"].length/2
+    rigify_arm.data.edit_bones["toe.R"].tail[1]-=rigify_arm.data.edit_bones["foot.R"].length/2
 
     rigify_arm.data.edit_bones["heel.02.L"].head=rigify_arm.data.edit_bones["foot.L"].head
     rigify_arm.data.edit_bones["heel.02.L"].head[2]=rigify_arm.data.edit_bones["foot.L"].tail[2]
