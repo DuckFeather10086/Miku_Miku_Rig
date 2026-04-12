@@ -7,8 +7,8 @@ import json
 '''
 使用方式
 在__init__.py中添加
-from . import translation
-translation.register_module()
+    from . import mmr_translation
+    mmr_translation.register_module()
 即可
 '''
 ###
@@ -77,11 +77,3 @@ def register_module():
 def unregister_module():
     global addon_name
     bpy.app.translations.unregister(addon_name)
-
-
-def register():
-    register_module()
-
-
-def unregister():
-    unregister_module()

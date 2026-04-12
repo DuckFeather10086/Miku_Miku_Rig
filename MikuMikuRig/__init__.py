@@ -17,7 +17,7 @@ from . import rig
 from . import pose_lib
 from . import physics
 from . import mmr_operators
-from . import translation
+from . import mmr_translation
 
 
 # Panels (Rig, Extra, About); animation and cloth panels removed
@@ -74,13 +74,13 @@ modules_to_register = (
     pose_lib,
     physics,
     mmr_operators,
-    translation,
 )
 
 
 def register():
     for module in modules_to_register:
         module.register()
+    mmr_translation.register_module()
     for cls in _panel_classes:
         bpy.utils.register_class(cls)
     print(f"Registered: {bl_info['name']} version {bl_info['version']}")
@@ -89,6 +89,7 @@ def register():
 def unregister():
     for cls in reversed(_panel_classes):
         bpy.utils.unregister_class(cls)
+    mmr_translation.unregister_module()
     for module in reversed(modules_to_register):
         module.unregister()
     print(f"Unregistered: {bl_info['name']}")
