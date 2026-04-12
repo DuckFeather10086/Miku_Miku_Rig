@@ -1,15 +1,6 @@
 import bpy
-
-bl_info = {
-    "name": "MikuMikuRig",
-    "author": "William",
-    "version": (0, 5, 7, 0),
-    "blender": (5, 0, 0),
-    "location": "3DView > Tools",
-    "description": "快速为各种人形模型生成rigify控制器,一键套mixamo动作",
-    "support": 'COMMUNITY',
-    "category": "Rigging",
-}
+import tomllib
+from pathlib import Path
 
 from . import base
 from . import settings
@@ -18,6 +9,20 @@ from . import pose_lib
 from . import physics
 from . import mmr_operators
 from . import mmr_translation
+
+
+def _load_manifest():
+    """Metadata for extensions lives in blender_manifest.toml (bl_info is removed at load)."""
+    manifest_path = Path(__file__).resolve().parent / "blender_manifest.toml"
+    with open(manifest_path, "rb") as f:
+        return tomllib.load(f)
+
+
+_MANIFEST = _load_manifest()
+
+
+def _addon_version_str():
+    return str(_MANIFEST.get("version", "0.0.0"))
 
 
 # Panels (Rig, Extra, About); animation and cloth panels removed
@@ -60,7 +65,7 @@ class MikuMikuRig_5(base.Mmr_Panel_Base):
         mmr_property = scene.mmr_property
         layout = self.layout
         layout.label(text="MikuMikuRig")
-        layout.label(text="版本号:" + str(bl_info["version"]))
+        layout.label(text="版本号:" + _addon_version_str())
         layout.label(text="作者:小威廉伯爵")
         layout.prop(mmr_property, 'debug', text="Debug")
 
@@ -83,7 +88,7 @@ def register():
     mmr_translation.register_module()
     for cls in _panel_classes:
         bpy.utils.register_class(cls)
-    print(f"Registered: {bl_info['name']} version {bl_info['version']}")
+    print(f"Registered: {_MANIFEST.get('name', 'MikuMikuRig')} version {_addon_version_str()}")
 
 
 def unregister():
@@ -92,4 +97,4 @@ def unregister():
     mmr_translation.unregister_module()
     for module in reversed(modules_to_register):
         module.unregister()
-    print(f"Unregistered: {bl_info['name']}")
+    print(f"Unregistered: {_MANIFEST.get('name', 'MikuMikuRig')}")

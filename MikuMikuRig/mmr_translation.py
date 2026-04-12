@@ -64,16 +64,13 @@ def load_l10n_dict(popath):
             msgctxt = None
     return l10n_dict
 
-#自定义
-addon_name = 'MikuMikuRig'
 def register_module():
-    os.path.dirname(__file__)
     my_dir = os.path.dirname(os.path.realpath(__file__))
     po_file_path = os.path.join(my_dir, "MMR_translate_CN.po")
     l10n_dict = load_l10n_dict(po_file_path)
-    global addon_name
-    bpy.app.translations.register(addon_name, l10n_dict)
+    name = __package__ or __name__
+    bpy.app.translations.register(name, l10n_dict)
 
 def unregister_module():
-    global addon_name
-    bpy.app.translations.unregister(addon_name)
+    name = __package__ or __name__
+    bpy.app.translations.unregister(name)

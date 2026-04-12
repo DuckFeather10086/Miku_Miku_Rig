@@ -1,0 +1,27 @@
+# Blender Extension manifest (Blender 4.2+ / 5.x)
+# https://docs.blender.org/manual/en/5.0/advanced/extensions/getting_started.html
+schema_version = "1.0.0"
+
+id = "miku_miku_rig"
+version = "0.5.7"
+name = "MikuMikuRig"
+tagline = "Rigify controllers for humanoid armatures and MMD-style rigs"
+maintainer = "William <https://github.com/958261649/Miku_Miku_Rig>"
+type = "add-on"
+
+tags = ["Rigging"]
+
+blender_version_min = "5.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+# Exclude junk from `blender --command extension build` (optional)
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "/*.zip",
+  "Untitled",
+]
