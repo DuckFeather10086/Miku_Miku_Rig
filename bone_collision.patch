@@ -1,0 +1,328 @@
+diff --git a/MikuMikuRig/__init__.py b/MikuMikuRig/__init__.py
+index c10bccd..b50dc72 100644
+--- a/MikuMikuRig/__init__.py
++++ b/MikuMikuRig/__init__.py
+@@ -78,6 +78,12 @@ class MMR_property(bpy.types.PropertyGroup):
+     extra_options1:bpy.props.BoolProperty(default=False,description="高级选项")
+     extra_options2:bpy.props.BoolProperty(default=False,description="高级选项")
+     mass_multiply_rate:FloatProperty(default=12.5,description="刚体质量倍率",min=0)
++    bone_collision_radius:FloatProperty(default=0.0,description="骨骼胶囊碰撞体半径，0 为按骨骼长度自动",min=0)
++    bone_collision_ratio:FloatProperty(default=0.12,description="自动半径时，半径 = 骨骼长度 × 此比例",min=0.001)
++    bone_collision_segments:IntProperty(default=8,description="骨骼胶囊的环向分段数",min=3,max=32)
++    bone_collision_length_segments:IntProperty(default=4,description="骨骼胶囊圆柱段沿长度方向的分段数",min=1,max=32)
++    bone_collision_shrinkwrap:BoolProperty(default=True,description="用骨骼权重组把胶囊贴合到绑定模型上")
++    bone_collision_weight_threshold:FloatProperty(default=0.3,description="shrinkwrap 时纳入该骨骼区域的最小权重",min=0,max=1)
+     import_as_NLA_strip: bpy.props.BoolProperty(
+         name='Import as NLA strip',
+         description="Import as NLA strip",
+@@ -168,6 +174,16 @@ class MikuMikuRig_4(Mmr_Panel_Base):
+         layout.prop(mmr_property,'extend_ribbon',text="Extend ribbon area",toggle=True)
+         layout.label(text="This featur is developed in cooperation with")
+         layout.label(text="UuuNyaa")
++        layout.separator()
++        layout.label(text="Select armature then press the button")
++        layout.operator("mmr.generate_bone_collision",text="Generate bone collision")
++        layout.prop(mmr_property,'bone_collision_radius',text="Capsule radius (0=auto)")
++        layout.prop(mmr_property,'bone_collision_ratio',text="Auto radius ratio")
++        layout.prop(mmr_property,'bone_collision_segments',text="Capsule segments")
++        layout.prop(mmr_property,'bone_collision_length_segments',text="Capsule length segments")
++        layout.prop(mmr_property,'bone_collision_shrinkwrap',text="Shrinkwrap to body",toggle=True)
++        if mmr_property.bone_collision_shrinkwrap:
++            layout.prop(mmr_property,'bone_collision_weight_threshold',text="Weight threshold")
+ 
+ class MikuMikuRig_5(Mmr_Panel_Base):
+     bl_idname="MMR_PT_panel_5"
+diff --git a/MikuMikuRig/mmr_operators/__init__.py b/MikuMikuRig/mmr_operators/__init__.py
+index 5ccff95..ea38ade 100644
+--- a/MikuMikuRig/mmr_operators/__init__.py
++++ b/MikuMikuRig/mmr_operators/__init__.py
+@@ -5,8 +5,9 @@ from . import rig
+ from . import retarget
+ from . import physics
+ from . import extra
++from . import collision
+ 
+-Model_list=[preset,rig,retarget,physics,extra]
++Model_list=[preset,rig,retarget,physics,extra,collision]
+ 
+ def register():
+     for Model in Model_list:
+diff --git a/MikuMikuRig/mmr_operators/collision.py b/MikuMikuRig/mmr_operators/collision.py
+new file mode 100644
+index 0000000..c7d6808
+--- /dev/null
++++ b/MikuMikuRig/mmr_operators/collision.py
+@@ -0,0 +1,273 @@
++import bpy
++import bmesh
++import math
++import mathutils
++from mathutils.bvhtree import BVHTree
++from bpy.types import Operator
++
++def alert_error(title, message):
++    def draw(self, context):
++        self.layout.label(text=str(message))
++    bpy.context.window_manager.popup_menu(draw, title=title, icon='ERROR')
++
++# 让局部 +Z 轴对齐到骨骼的 +Y 轴（Blender 骨骼沿自身 Y 轴生长）
++# rotate local +Z to the bone's +Y axis (Blender bones grow along their own Y axis)
++_Z_TO_Y = mathutils.Matrix.Rotation(math.radians(-90), 4, 'X')
++
++
++def add_bone_capsule(bm, bone, radius, u_segments, hemi_rings, length_segments):
++    '''沿单根骨骼(rest 姿态)生成一个胶囊网格，返回新增的顶点列表。
++    圆柱段会按 length_segments 加入环向分段，方便后续 shrinkwrap 贴合形状。
++    generate one capsule along a single bone (rest pose), return the new verts.
++    the cylinder part is divided by length_segments so a later shrinkwrap has
++    enough geometry to conform to the body shape.'''
++    length = bone.length
++    r = radius
++    u = max(3, u_segments)
++    hemi = max(1, hemi_rings)
++    lseg = max(1, length_segments)
++
++    # 顶点先在骨骼局部空间(沿 +Z)生成，再变换到骨架空间
++    # build verts in bone local space (along +Z) first, then move into armature space
++    full_matrix = bone.matrix_local @ _Z_TO_Y
++
++    def tf(x, y, z):
++        return full_matrix @ mathutils.Vector((x, y, z))
++
++    def add_ring(rr, zz):
++        ring = []
++        for j in range(u):
++            theta = 2 * math.pi * j / u
++            v = bm.verts.new(tf(rr * math.cos(theta), rr * math.sin(theta), zz))
++            ring.append(v)
++            new_verts.append(v)
++        return ring
++
++    new_verts = []
++
++    # 底部极点（胶囊头端的半球极点）
++    bottom_pole = bm.verts.new(tf(0.0, 0.0, -r))
++    new_verts.append(bottom_pole)
++
++    rings = []  # 每个环是 u 个顶点
++    # 底半球：纬度角 a 从接近 -90°(极点) 到 0°(赤道，z=0 处满半径)
++    for k in range(1, hemi + 1):
++        a = -math.pi / 2 + (math.pi / 2) * (k / hemi)
++        rings.append(add_ring(r * math.cos(a), r * math.sin(a)))
++    # 圆柱段：在 z=0 和 z=length 之间插入满半径的中间环
++    for m in range(1, lseg):
++        rings.append(add_ring(r, length * m / lseg))
++    # 顶半球：纬度角 a 从 0°(赤道，z=length 处满半径) 到接近 90°
++    for k in range(0, hemi):
++        a = (math.pi / 2) * (k / hemi)
++        rings.append(add_ring(r * math.cos(a), length + r * math.sin(a)))
++    # 顶部极点
++    top_pole = bm.verts.new(tf(0.0, 0.0, length + r))
++    new_verts.append(top_pole)
++
++    # 底极点扇形面
++    first_ring = rings[0]
++    for j in range(u):
++        bm.faces.new((bottom_pole, first_ring[j], first_ring[(j + 1) % u]))
++    # 相邻环之间的四边形面
++    for ri in range(len(rings) - 1):
++        a_ring = rings[ri]
++        b_ring = rings[ri + 1]
++        for j in range(u):
++            j2 = (j + 1) % u
++            bm.faces.new((a_ring[j], b_ring[j], b_ring[j2], a_ring[j2]))
++    # 顶极点扇形面
++    last_ring = rings[-1]
++    for j in range(u):
++        bm.faces.new((top_pole, last_ring[(j + 1) % u], last_ring[j]))
++
++    return new_verts
++
++
++def find_body_mesh(armature):
++    '''找到绑在该骨架上的网格模型（带 Armature 修改器、顶点组最多的那个）。
++    find the mesh bound to this armature (has an armature modifier, most groups).'''
++    candidates = []
++    for child in armature.children:
++        if child.type != 'MESH':
++            continue
++        for m in child.modifiers:
++            if m.type == 'ARMATURE' and m.object == armature:
++                candidates.append(child)
++                break
++    if not candidates:
++        return None
++    candidates.sort(key=lambda o: len(o.vertex_groups), reverse=True)
++    return candidates[0]
++
++
++def build_shrinkwrap_data(body, armature, threshold):
++    '''预计算用于按骨骼 shrinkwrap 的数据：
++    - 骨架空间下的顶点坐标
++    - 每个面的顶点索引
++    - 顶点 -> 所属面 的邻接表
++    - 顶点组索引 -> 权重达标的顶点集合
++    returns (verts_co, poly_verts, vert_polys, group_to_verts) or None.'''
++    mesh = body.data
++    if len(mesh.polygons) == 0:
++        return None
++
++    # 把模型顶点从世界空间换算到骨架的局部空间（胶囊就建在这个空间里）
++    to_arm = armature.matrix_world.inverted() @ body.matrix_world
++    verts_co = [to_arm @ v.co for v in mesh.vertices]
++
++    poly_verts = [tuple(p.vertices) for p in mesh.polygons]
++
++    vert_polys = [[] for _ in range(len(mesh.vertices))]
++    for pi, p in enumerate(mesh.polygons):
++        for vi in p.vertices:
++            vert_polys[vi].append(pi)
++
++    group_to_verts = {}
++    for vi, v in enumerate(mesh.vertices):
++        for g in v.groups:
++            if g.weight >= threshold:
++                group_to_verts.setdefault(g.group, set()).add(vi)
++
++    return verts_co, poly_verts, vert_polys, group_to_verts
++
++
++def shrinkwrap_bone_verts(verts, group_index, sw_data):
++    '''把一根骨骼的胶囊顶点投影到模型上属于该骨骼权重区域的表面。
++    project one bone's capsule verts onto the body surface weighted to that bone.'''
++    verts_co, poly_verts, vert_polys, group_to_verts = sw_data
++    selected = group_to_verts.get(group_index)
++    if not selected:
++        return False
++
++    poly_ids = set()
++    for vi in selected:
++        poly_ids.update(vert_polys[vi])
++    if not poly_ids:
++        return False
++
++    polygons = [poly_verts[pi] for pi in poly_ids]
++    bvh = BVHTree.FromPolygons(verts_co, polygons, all_triangles=False)
++
++    for v in verts:
++        loc, _normal, _index, _dist = bvh.find_nearest(v.co)
++        if loc is not None:
++            v.co = loc
++    return True
++
++
++def generate_bone_collision(context):
++    armature = context.view_layer.objects.active
++    if armature is None or armature.type != 'ARMATURE':
++        alert_error("提示", "请先选中一个骨架")
++        return False
++
++    scene = context.scene
++    mmr_property = scene.mmr_property
++
++    u_segments = max(3, mmr_property.bone_collision_segments)
++    hemi_rings = max(2, u_segments // 4)
++    length_segments = max(1, mmr_property.bone_collision_length_segments)
++    radius_setting = mmr_property.bone_collision_radius
++    radius_ratio = mmr_property.bone_collision_ratio
++    use_shrinkwrap = mmr_property.bone_collision_shrinkwrap
++    threshold = mmr_property.bone_collision_weight_threshold
++
++    # 只对参与形变的骨骼生成，跳过零长度骨骼
++    # only build for deform bones, skip zero length bones
++    deform_bones = [b for b in armature.data.bones if b.use_deform and b.length > 1e-4]
++    if len(deform_bones) == 0:
++        alert_error("提示", "骨架里没有可用的形变骨骼")
++        return False
++
++    # 准备 shrinkwrap 数据（找不到模型就退化为纯胶囊）
++    # prepare shrinkwrap data (fall back to plain capsules if no body mesh)
++    body = find_body_mesh(armature) if use_shrinkwrap else None
++    sw_data = build_shrinkwrap_data(body, armature, threshold) if body is not None else None
++
++    # 已存在同名碰撞体时先删除，方便重复生成
++    # remove previously generated collision object so it can be regenerated
++    obj_name = armature.name + "_collision"
++    old_obj = bpy.data.objects.get(obj_name)
++    if old_obj is not None:
++        bpy.data.objects.remove(old_obj, do_unlink=True)
++
++    bm = bmesh.new()
++    bone_verts = []  # [(bone_name, [BMVert, ...]), ...]
++    wrapped_count = 0
++    for bone in deform_bones:
++        if radius_setting > 0:
++            radius = radius_setting
++        else:
++            radius = max(bone.length * radius_ratio, 1e-3)
++        verts = add_bone_capsule(bm, bone, radius, u_segments, hemi_rings, length_segments)
++
++        # 用该骨骼在模型上的同名权重组做 shrinkwrap，让胶囊贴合身体形状
++        # shrinkwrap this capsule onto the body region weighted to the same bone
++        if sw_data is not None and bone.name in body.vertex_groups:
++            gi = body.vertex_groups[bone.name].index
++            if shrinkwrap_bone_verts(verts, gi, sw_data):
++                wrapped_count += 1
++
++        bone_verts.append((bone.name, verts))
++
++    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
++    bm.verts.index_update()
++    # 记录每根骨骼对应的顶点索引，用于写权重
++    bone_indices = [(name, [v.index for v in verts]) for name, verts in bone_verts]
++
++    mesh = bpy.data.meshes.new(obj_name)
++    bm.to_mesh(mesh)
++    bm.free()
++    mesh.update()
++
++    obj = bpy.data.objects.new(obj_name, mesh)
++    context.collection.objects.link(obj)
++
++    # 让碰撞体和骨架处于同一坐标空间，骨架修改器才能正确驱动
++    # keep the collision object in the armature's space so the armature modifier works
++    obj.parent = armature
++    obj.matrix_world = armature.matrix_world.copy()
++
++    # 写入权重：每个胶囊 100% 归属各自的源骨骼
++    # weights: each capsule is fully bound to its own source bone
++    for name, indices in bone_indices:
++        vg = obj.vertex_groups.new(name=name)
++        vg.add(indices, 1.0, 'REPLACE')
++
++    # 骨架修改器：胶囊跟随骨骼一起形变。
++    # 由于共用同一根骨架，源骨骼上的约束 / 驱动器会被自动继承，无需单独拷贝。
++    # armature modifier: the capsules follow the bones; because they share the same
++    # armature, any constraint/driver on the source bone is inherited automatically.
++    arm_mod = obj.modifiers.new('mmr_collision_armature', 'ARMATURE')
++    arm_mod.object = armature
++
++    # 碰撞修改器：生成的网格可直接作为布料 / 软体的碰撞体
++    # collision modifier: ready to be used as a collider for cloth / soft body
++    obj.modifiers.new('mmr_collision', 'COLLISION')
++
++    obj.display_type = 'WIRE'
++    obj.hide_render = True
++
++    context.view_layer.objects.active = armature
++    msg = "已生成 " + str(len(deform_bones)) + " 个骨骼胶囊碰撞体"
++    if use_shrinkwrap:
++        if sw_data is None:
++            msg += "（未找到绑定模型，跳过 shrinkwrap）"
++        else:
++            msg += "，其中 " + str(wrapped_count) + " 个已贴合模型"
++    alert_error("提示", msg)
++    return True
++
++
++class OT_Generate_Bone_Collision(Operator):
++    bl_idname = "mmr.generate_bone_collision"  # python 提示
++    bl_label = "Interface"
++    bl_options = {'REGISTER', 'UNDO'}
++
++    def execute(self, context):
++        generate_bone_collision(context)
++        return {"FINISHED"}
++
++
++Class_list = [OT_Generate_Bone_Collision]
