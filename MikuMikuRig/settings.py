@@ -41,6 +41,11 @@ class MMR_property(bpy.types.PropertyGroup):
     capsule_scale: FloatProperty(name="Capsule scale", default=1.0, min=0.1, max=5.0)
     capsule_add_rigid_body: BoolProperty(name="Add Rigid Body", default=False)
 
+    # Native pose assets live outside the extension installation directory.
+    pose_asset_directory: StringProperty(name="姿势资产目录", subtype='DIR_PATH', default="",
+        description="留空使用全局 MMR Poses 资产库；保存时自动注册")
+    pose_asset_category: StringProperty(name="分类", default="通用姿势")
+
     # Pose library
     pose_lib_directory: StringProperty(
         name="Pose library directory",

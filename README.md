@@ -12,6 +12,12 @@ MikuMikuRig 是一个以 Rigify 生成为核心的 Blender 插件。当前分支
 
 MikuMikuRig is a Blender add-on focused on Rigify controller generation. This branch has been refactored into a modular structure, keeping the main rig generation workflow while replacing animation import and cloth conversion with a JSONL pose library and bone-attached capsule colliders.
 
+## 官方姿势资产（0.6.0 / Blender 5.2）
+
+N → MMR → **官方姿势资产 · MMR**：保存 FK 姿势资产，自动注册固定库和分类，使用官方缩略图浏览；通过 **MMR · FK 应用** 跨体型套姿势，再 **对齐并切到 IK** 微调手脚。旧 JSONL 库保留在折叠面板。
+
+[使用方法、处理范围与验证](docs/POSE_ASSETS.md)
+
 ## 功能 Functions
 
 - 一键为任意人形骨架生成 Rigify 控制器

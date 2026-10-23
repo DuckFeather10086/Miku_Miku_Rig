@@ -3,7 +3,7 @@
 schema_version = "1.0.0"
 
 id = "miku_miku_rig"
-version = "0.5.7"
+version = "0.6.0"
 name = "MikuMikuRig"
 tagline = "Rigify controllers for humanoid armatures and MMD-style rigs"
 maintainer = "William <https://github.com/958261649/Miku_Miku_Rig>"
@@ -11,11 +11,14 @@ type = "add-on"
 
 tags = ["Rigging"]
 
-blender_version_min = "5.0.0"
+blender_version_min = "5.2.0"
 
 license = [
   "SPDX:GPL-3.0-or-later",
 ]
+
+[permissions]
+files = "Save FK pose assets and catalogs to your asset library"
 
 # Exclude junk from `blender --command extension build` (optional)
 [build]
